@@ -1,0 +1,113 @@
+from datetime import datetime
+
+from sqlalchemy import Select, select
+from sqlalchemy.orm import Session
+
+from clay.db.models_market import MarketBar, MarketFreshnessStatus
+
+
+class MarketRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_market_bars(self, bars: list[dict[str, object]]) -> int:
+        written = 0
+        for bar in bars:
+            existing = self.session.scalar(
+                select(MarketBar).where(
+                    MarketBar.symbol == bar["symbol"],
+                    MarketBar.timeframe == bar["timeframe"],
+                    MarketBar.bar_open_time == bar["bar_open_time"],
+                ),
+            )
+            if existing is None:
+                self.session.add(MarketBar(**bar))
+                written += 1
+                continue
+
+            existing.open = float(bar["open"])
+            existing.high = float(bar["high"])
+            existing.low = float(bar["low"])
+            existing.close = float(bar["close"])
+            existing.volume = float(bar["volume"])
+            existing.quote_volume = (
+                float(bar["quote_volume"])
+                if bar["quote_volume"] is not None
+                else None
+            )
+            existing.source = str(bar["source"])
+            existing.bar_close_time = bar["bar_close_time"]  # type: ignore[assignment]
+            written += 1
+
+        self.session.flush()
+        return written
+
+    def upsert_freshness_status(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        freshness_state: str,
+        evaluated_at: datetime,
+        latest_bar_open_time: datetime | None,
+        is_stale: bool,
+    ) -> None:
+        existing = self.session.scalar(
+            select(MarketFreshnessStatus).where(
+                MarketFreshnessStatus.symbol == symbol,
+                MarketFreshnessStatus.timeframe == timeframe,
+            ),
+        )
+        if existing is None:
+            self.session.add(
+                MarketFreshnessStatus(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    freshness_state=freshness_state,
+                    evaluated_at=evaluated_at,
+                    latest_bar_open_time=latest_bar_open_time,
+                    is_stale=is_stale,
+                ),
+            )
+        else:
+            existing.freshness_state = freshness_state
+            existing.evaluated_at = evaluated_at
+            existing.latest_bar_open_time = latest_bar_open_time
+            existing.is_stale = is_stale
+
+        self.session.flush()
+
+    def list_latest_bars(
+        self,
+        *,
+        symbol: str | None = None,
+        timeframe: str | None = None,
+        limit: int = 50,
+    ) -> list[MarketBar]:
+        query: Select[tuple[MarketBar]] = select(MarketBar).order_by(
+            MarketBar.bar_close_time.desc(),
+        )
+        if symbol is not None:
+            query = query.where(MarketBar.symbol == symbol)
+        if timeframe is not None:
+            query = query.where(MarketBar.timeframe == timeframe)
+
+        bars = list(self.session.scalars(query).all())
+        deduped: list[MarketBar] = []
+        seen: set[tuple[str, str]] = set()
+        for bar in bars:
+            key = (bar.symbol, bar.timeframe)
+            if key in seen:
+                continue
+            deduped.append(bar)
+            seen.add(key)
+            if len(deduped) >= limit:
+                break
+        return deduped
+
+    def list_freshness_statuses(self) -> list[MarketFreshnessStatus]:
+        query = select(MarketFreshnessStatus).order_by(
+            MarketFreshnessStatus.symbol.asc(),
+            MarketFreshnessStatus.timeframe.asc(),
+        )
+        return list(self.session.scalars(query).all())

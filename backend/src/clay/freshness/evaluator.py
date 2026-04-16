@@ -1,0 +1,77 @@
+from datetime import UTC, datetime, timedelta
+
+from clay.freshness.models import FreshnessResult
+
+
+MARKET_THRESHOLDS = {
+    "5m": timedelta(minutes=10),
+    "15m": timedelta(minutes=25),
+    "1h": timedelta(minutes=80),
+}
+
+CONTEXT_THRESHOLDS = {
+    "news": timedelta(hours=8),
+    "sentiment": timedelta(hours=4),
+}
+
+
+def evaluate_market_freshness(
+    timeframe: str,
+    last_received_at: datetime | None,
+    now: datetime,
+) -> FreshnessResult:
+    if last_received_at is None:
+        return FreshnessResult(
+            stream_name=f"market:{timeframe}",
+            status="unknown",
+            observed_at=now,
+            blocks_active_trading=True,
+            reason="missing last_received_at",
+        )
+
+    last_received_at = _coerce_timezone(last_received_at)
+    now = _coerce_timezone(now)
+    delta = now - last_received_at
+    threshold = MARKET_THRESHOLDS[timeframe]
+    status = "fresh" if delta <= threshold else "stale"
+    return FreshnessResult(
+        stream_name=f"market:{timeframe}",
+        status=status,
+        observed_at=now,
+        blocks_active_trading=status == "stale",
+        reason=f"delta={delta}",
+    )
+
+
+def evaluate_context_freshness(
+    stream_name: str,
+    last_received_at: datetime | None,
+    now: datetime,
+) -> FreshnessResult:
+    if last_received_at is None:
+        return FreshnessResult(
+            stream_name=f"context:{stream_name}",
+            status="degraded",
+            observed_at=now,
+            blocks_active_trading=False,
+            reason="missing last_received_at",
+        )
+
+    last_received_at = _coerce_timezone(last_received_at)
+    now = _coerce_timezone(now)
+    threshold = CONTEXT_THRESHOLDS[stream_name]
+    delta = now - last_received_at
+    status = "fresh" if delta <= threshold else "degraded"
+    return FreshnessResult(
+        stream_name=f"context:{stream_name}",
+        status=status,
+        observed_at=now,
+        blocks_active_trading=False,
+        reason=f"delta={delta}",
+    )
+
+
+def _coerce_timezone(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

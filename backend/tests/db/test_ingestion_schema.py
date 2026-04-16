@@ -1,0 +1,44 @@
+from sqlalchemy.orm import sessionmaker
+
+from clay.db.models_context import NewsItem, SentimentSnapshot
+from clay.db.models_market import MarketBar, MarketFreshnessStatus, OrderBookSummary
+from clay.db.models_ops import ConnectorStatusHistory, IngestRun, SourceHealthEvent
+from clay.db.session import build_engine, build_session_factory
+from clay.settings.ingestion import IngestionSettings
+
+
+def test_ingestion_settings_expose_v1_timeframes() -> None:
+    settings = IngestionSettings()
+
+    assert settings.market_timeframes == ["5m", "15m", "1h"]
+    assert settings.market_symbols == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert settings.binance_spot_enabled is True
+
+
+def test_database_bootstrap_uses_configured_url() -> None:
+    settings = IngestionSettings(
+        database_url="postgresql+psycopg://clay:clay@localhost:5432/clay_test",
+    )
+
+    engine = build_engine(settings)
+    session_factory = build_session_factory(settings)
+
+    assert engine.url.render_as_string(hide_password=False).endswith("/clay_test")
+    assert isinstance(session_factory, sessionmaker)
+
+
+def test_market_schema_contains_expected_tables() -> None:
+    assert MarketBar.__tablename__ == "market_bars"
+    assert OrderBookSummary.__tablename__ == "orderbook_summaries"
+    assert MarketFreshnessStatus.__tablename__ == "market_freshness_status"
+
+
+def test_context_schema_contains_expected_tables() -> None:
+    assert NewsItem.__tablename__ == "news_items"
+    assert SentimentSnapshot.__tablename__ == "sentiment_snapshots"
+
+
+def test_ops_schema_contains_expected_tables() -> None:
+    assert IngestRun.__tablename__ == "ingest_runs"
+    assert ConnectorStatusHistory.__tablename__ == "connector_status_history"
+    assert SourceHealthEvent.__tablename__ == "source_health_events"
