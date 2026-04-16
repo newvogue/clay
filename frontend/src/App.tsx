@@ -1,37 +1,60 @@
-import { useControlPlane } from './hooks/use-control-plane'
-import { AlertsPanel } from './features/alerts/alerts-panel'
-import { RuntimePanel } from './features/runtime/runtime-panel'
-import { ServicesTable } from './features/services/services-table'
+import { ActiveConfigurationPanel } from './features/control-center/active-configuration-panel'
+import { AlertsAuditPanel } from './features/control-center/alerts-audit-panel'
+import { ControlCenterStateBanner } from './features/control-center/state-banner'
+import { ManagedServicesPanel } from './features/control-center/managed-services-panel'
+import { RuntimeStatusPanel } from './features/control-center/runtime-status-panel'
+import { SystemHealthPanel } from './features/control-center/system-health-panel'
+import { useControlCenter } from './features/control-center/use-control-center'
 
 export function App() {
-  const controlPlane = useControlPlane()
+  const controlCenter = useControlCenter()
+  const snapshot = controlCenter.snapshot
 
   return (
     <main>
       <h1>Clay</h1>
-      <p>Your own trading workspace. Signals, review, and control.</p>
-      <RuntimePanel
-        runtime={controlPlane.runtime}
-        isLoading={controlPlane.isLoading}
-        isActing={controlPlane.isActing}
-        error={controlPlane.error}
+      <p>Operator-facing control center for runtime, ingestion, incidents, and safe system actions.</p>
+      <ControlCenterStateBanner
+        summary={snapshot?.summary ?? null}
+        isLoading={controlCenter.isLoading}
+        error={controlCenter.error}
+      />
+      <SystemHealthPanel
+        ingestion={snapshot?.ingestion ?? null}
+        isLoading={controlCenter.isLoading}
+        isActing={controlCenter.isActing}
+        onRunIngestion={() => {
+          void controlCenter.runIngestionCycle()
+        }}
+      />
+      <RuntimeStatusPanel
+        runtime={snapshot?.runtime ?? null}
+        isLoading={controlCenter.isLoading}
+        isActing={controlCenter.isActing}
         onTransition={(target) => {
-          void controlPlane.transitionRuntime(target)
+          void controlCenter.transitionRuntime(target)
         }}
       />
-      <ServicesTable
-        services={controlPlane.services}
-        isLoading={controlPlane.isLoading}
-        isActing={controlPlane.isActing}
-        error={controlPlane.error}
+      <ManagedServicesPanel
+        services={snapshot?.services ?? []}
+        isLoading={controlCenter.isLoading}
+        isActing={controlCenter.isActing}
         onAction={(serviceId, action) => {
-          void controlPlane.runServiceAction(serviceId, action)
+          void controlCenter.runServiceAction(serviceId, action)
         }}
       />
-      <AlertsPanel
-        preflight={controlPlane.preflight}
-        isLoading={controlPlane.isLoading}
-        error={controlPlane.error}
+      <AlertsAuditPanel
+        incidents={snapshot?.incidents ?? []}
+        audit={snapshot?.audit ?? []}
+        isLoading={controlCenter.isLoading}
+      />
+      <ActiveConfigurationPanel
+        config={snapshot?.config ?? null}
+        isLoading={controlCenter.isLoading}
+        isActing={controlCenter.isActing}
+        onRestore={(scope) => {
+          void controlCenter.restoreConfig(scope)
+        }}
       />
     </main>
   )

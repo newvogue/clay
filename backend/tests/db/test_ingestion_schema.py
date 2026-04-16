@@ -33,6 +33,22 @@ def test_market_schema_contains_expected_tables() -> None:
     assert MarketFreshnessStatus.__tablename__ == "market_freshness_status"
 
 
+def test_timescale_partition_columns_are_part_of_market_primary_keys() -> None:
+    market_bar_primary_key = {
+        column.name
+        for column in MarketBar.__table__.primary_key.columns
+    }
+    orderbook_primary_key = {
+        column.name
+        for column in OrderBookSummary.__table__.primary_key.columns
+    }
+
+    assert market_bar_primary_key == {"id", "bar_open_time"}
+    assert orderbook_primary_key == {"id", "captured_at"}
+    assert MarketBar.__table__.c.id.identity is not None
+    assert OrderBookSummary.__table__.c.id.identity is not None
+
+
 def test_context_schema_contains_expected_tables() -> None:
     assert NewsItem.__tablename__ == "news_items"
     assert SentimentSnapshot.__tablename__ == "sentiment_snapshots"

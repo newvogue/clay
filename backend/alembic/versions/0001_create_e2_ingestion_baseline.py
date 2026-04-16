@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision = "0001_create_e2_ingestion_baseline"
+revision = "0001_e2_baseline"
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -18,7 +18,7 @@ def upgrade() -> None:
 
     op.create_table(
         "market_bars",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.Integer(), sa.Identity(), nullable=False),
         sa.Column("symbol", sa.String(length=32), nullable=False),
         sa.Column("timeframe", sa.String(length=8), nullable=False),
         sa.Column("open", sa.Float(), nullable=False),
@@ -30,13 +30,14 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=32), nullable=False, server_default="binance_spot"),
         sa.Column("bar_open_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column("bar_close_time", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", "bar_open_time"),
         sa.UniqueConstraint("symbol", "timeframe", "bar_open_time", name="uq_market_bar"),
         schema="market",
     )
 
     op.create_table(
         "orderbook_summaries",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.Integer(), sa.Identity(), nullable=False),
         sa.Column("symbol", sa.String(length=32), nullable=False),
         sa.Column("best_bid", sa.Float(), nullable=False),
         sa.Column("best_ask", sa.Float(), nullable=False),
@@ -44,6 +45,7 @@ def upgrade() -> None:
         sa.Column("ask_depth_top", sa.Float(), nullable=True),
         sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("source", sa.String(length=32), nullable=False, server_default="binance_spot"),
+        sa.PrimaryKeyConstraint("id", "captured_at"),
         schema="market",
     )
 

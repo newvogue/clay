@@ -1,5 +1,6 @@
 from clay.audit.writer import AuditWriter
 from clay.config.loader import ConfigLoader
+from clay.control_center.service import ControlCenterService
 from clay.db.session import build_session_factory
 from clay.events.bus import EventBus
 from clay.ingestion.context.connectors.demo_news import DemoNewsConnector
@@ -72,4 +73,12 @@ ingestion_cycle_service = IngestionCycleService(
     settings=ingestion_settings,
     market_service=market_ingestion_service,
     context_manager=context_connector_manager,
+)
+control_center_service = ControlCenterService(
+    runtime_manager=runtime_manager,
+    preflight_service=preflight_service,
+    registry=registry,
+    supervisor=supervisor,
+    config_loader=config_loader,
+    audit_writer=audit_writer,
 )

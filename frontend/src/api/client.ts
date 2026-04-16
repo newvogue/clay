@@ -1,4 +1,8 @@
 import type {
+  ControlCenterSnapshot,
+  IngestionRunResult,
+} from '../types/control-center'
+import type {
   PreflightResult,
   RuntimeSnapshot,
   ServiceAction,
@@ -45,6 +49,10 @@ export function getPreflight(): Promise<PreflightResult> {
   return getJson<PreflightResult>('/preflight')
 }
 
+export function getControlCenterOverview(): Promise<ControlCenterSnapshot> {
+  return getJson<ControlCenterSnapshot>('/control-center/overview')
+}
+
 export function transitionRuntime(target: RuntimeState): Promise<RuntimeSnapshot> {
   return postJson<RuntimeSnapshot>('/runtime/transition', { target })
 }
@@ -58,6 +66,18 @@ export function runServiceAction(
   })
 }
 
+export function runIngestionCycle(): Promise<IngestionRunResult> {
+  return postJson<IngestionRunResult>('/ingestion/run', {})
+}
+
+export function restoreConfig(scope: string): Promise<{ scope: string; config: Record<string, unknown> }> {
+  return postJson<{ scope: string; config: Record<string, unknown> }>(`/configs/${scope}/restore`, {})
+}
+
 export function getEventStreamUrl(): string {
   return `${API_BASE_URL}/events/stream`
+}
+
+export function getControlCenterStreamUrl(): string {
+  return `${API_BASE_URL}/control-center/stream`
 }

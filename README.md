@@ -40,6 +40,16 @@ The current `E2` backend slice already includes:
 - orchestration flow for a full ingest cycle;
 - downstream backend routes backed by persisted data instead of demo payloads.
 
+## E4 Progress
+
+The current `E4` slice already includes:
+
+- a backend `Control Center` aggregator over runtime, services, ingest health, incidents, audit, and configs;
+- `GET /control-center/overview` for operator snapshots;
+- `GET /control-center/stream` for live UI refresh triggers over `SSE`;
+- audit and live event publishing for manual ingestion runs;
+- a frontend `Control Center` shell with runtime transitions, manual ingest trigger, service actions, incident/audit view, and config restore actions.
+
 ## Repository Layout
 
 - `backend/` — future backend application and runtime services
@@ -96,3 +106,11 @@ Copy `.env.example` if you want to override defaults for local development.
   - `GET /market-data/bars/latest`
   - `GET /context-data/summary`
   - `GET /shortlist/metrics`
+
+## E4 Notes
+
+- `Control Center` is intentionally operator-facing and not a substitute for the future `Trading Workspace`.
+- Current `E4` routes:
+  - `GET /control-center/overview`
+  - `GET /control-center/stream`
+- operator commands still flow through the existing runtime, services, configs, and ingestion endpoints.

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from clay.api.dependencies import get_db_session, get_ingestion_cycle_service
+from clay.bootstrap import audit_writer, event_bus
 from clay.db.repositories_context import ContextRepository
 from clay.db.repositories_market import MarketRepository
 from clay.db.repositories_ops import OpsRepository
@@ -116,4 +117,7 @@ async def run_ingestion_cycle(
     service: Annotated[IngestionCycleService, Depends(get_ingestion_cycle_service)],
 ) -> dict[str, object]:
     summary = await service.run_once(session)
-    return summary.as_payload()
+    payload = summary.as_payload()
+    audit_writer.write("ingestion.run", payload)
+    event_bus.publish("ingestion.updated", payload)
+    return payload

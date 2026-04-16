@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
 from clay.db.models_market import MarketBar, MarketFreshnessStatus
@@ -12,6 +12,7 @@ class MarketRepository:
 
     def upsert_market_bars(self, bars: list[dict[str, object]]) -> int:
         written = 0
+        next_sqlite_id = self._next_sqlite_market_bar_id()
         for bar in bars:
             existing = self.session.scalar(
                 select(MarketBar).where(
@@ -21,7 +22,11 @@ class MarketRepository:
                 ),
             )
             if existing is None:
-                self.session.add(MarketBar(**bar))
+                payload = dict(bar)
+                if payload.get("id") is None and next_sqlite_id is not None:
+                    payload["id"] = next_sqlite_id
+                    next_sqlite_id += 1
+                self.session.add(MarketBar(**payload))
                 written += 1
                 continue
 
@@ -41,6 +46,14 @@ class MarketRepository:
 
         self.session.flush()
         return written
+
+    def _next_sqlite_market_bar_id(self) -> int | None:
+        bind = self.session.get_bind()
+        if bind is None or bind.dialect.name != "sqlite":
+            return None
+
+        current_max = self.session.scalar(select(func.max(MarketBar.id)))
+        return int(current_max or 0) + 1
 
     def upsert_freshness_status(
         self,

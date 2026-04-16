@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Identity, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from clay.db.base import Base
@@ -13,7 +13,7 @@ class MarketBar(Base):
         {"schema": "market"},
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     timeframe: Mapped[str] = mapped_column(String(8), index=True)
     open: Mapped[float] = mapped_column(Float)
@@ -23,7 +23,11 @@ class MarketBar(Base):
     volume: Mapped[float] = mapped_column(Float)
     quote_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="binance_spot")
-    bar_open_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    bar_open_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        primary_key=True,
+    )
     bar_close_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
@@ -31,13 +35,17 @@ class OrderBookSummary(Base):
     __tablename__ = "orderbook_summaries"
     __table_args__ = {"schema": "market"}
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(Identity(), primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     best_bid: Mapped[float] = mapped_column(Float)
     best_ask: Mapped[float] = mapped_column(Float)
     bid_depth_top: Mapped[float | None] = mapped_column(Float, nullable=True)
     ask_depth_top: Mapped[float | None] = mapped_column(Float, nullable=True)
-    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+        primary_key=True,
+    )
     source: Mapped[str] = mapped_column(String(32), default="binance_spot")
 
 

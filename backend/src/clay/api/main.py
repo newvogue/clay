@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from clay.api.routes.control_center import router as control_center_router
+from clay.api.routes.control_center_stream import router as control_center_stream_router
 from clay.api.routes.context_data import router as context_data_router
 from clay.api.routes.configs import router as configs_router
 from clay.api.routes.events import router as events_router
@@ -18,6 +20,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
         summary="Local control plane for Clay",
     )
+    app.include_router(control_center_router)
+    app.include_router(control_center_stream_router)
     app.include_router(configs_router)
     app.include_router(context_data_router)
     app.include_router(events_router)
