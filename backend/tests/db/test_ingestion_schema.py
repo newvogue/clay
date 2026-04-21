@@ -1,6 +1,7 @@
 from sqlalchemy.orm import sessionmaker
 
 from clay.db.models_demo import DemoTradeRecord
+from clay.db.models_knowledge import KnowledgeChunk, KnowledgeItem
 from clay.db.models_context import NewsItem, SentimentSnapshot
 from clay.db.models_market import MarketBar, MarketFreshnessStatus, OrderBookSummary
 from clay.db.models_ops import ConnectorStatusHistory, IngestRun, SourceHealthEvent
@@ -70,3 +71,8 @@ def test_demo_schema_contains_expected_tables() -> None:
 def test_review_schema_contains_expected_tables() -> None:
     assert SignalFeedback.__tablename__ == "signal_feedback"
     assert "feedback_label" in SignalFeedback.__table__.c
+
+
+def test_knowledge_schema_contains_expected_tables() -> None:
+    assert KnowledgeItem.__tablename__ == "knowledge_items"
+    assert KnowledgeChunk.__tablename__ == "knowledge_chunks"

@@ -11,6 +11,7 @@ from clay.bootstrap import (
     ingestion_cycle_service,
     ingestion_session_factory,
     ingestion_settings,
+    knowledge_service,
     market_ingestion_service,
     session_control_service,
     session_review_service,
@@ -24,6 +25,7 @@ from clay.events.bus import EventBus
 from clay.ingestion.context.manager import ContextConnectorManager
 from clay.ingestion.market.service import MarketIngestionService
 from clay.ingestion.service import IngestionCycleService
+from clay.knowledge.service import KnowledgeService
 from clay.session_control.service import SessionControlService
 from clay.session_review.service import SessionReviewService
 from clay.signal_engine.service import SignalEngineService
@@ -86,3 +88,7 @@ def get_demo_trading_service() -> DemoTradingService:
 
 def get_session_review_service() -> SessionReviewService:
     return session_review_service
+
+
+def get_knowledge_service() -> KnowledgeService:
+    return knowledge_service

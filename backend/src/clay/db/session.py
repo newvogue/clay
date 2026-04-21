@@ -10,6 +10,7 @@ SQLITE_SCHEMA_TRANSLATE_MAP = {
     "ops": None,
     "demo": None,
     "review": None,
+    "knowledge": None,
 }
 
 

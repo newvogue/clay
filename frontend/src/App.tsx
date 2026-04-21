@@ -3,12 +3,13 @@ import { useState } from 'react'
 import { AIControlPage } from './features/ai-control/ai-control-page'
 import { ControlCenterPage } from './features/control-center/control-center-page'
 import { DemoValidationPage } from './features/demo-trading/demo-validation-page'
+import { KnowledgePage } from './features/knowledge/knowledge-page'
 import { SessionControlPage } from './features/session-control/session-control-page'
 import { SessionReviewPage } from './features/session-review/session-review-page'
 import { TradingWorkspacePage } from './features/workspace/trading-workspace-page'
 
 export function App() {
-  const [screen, setScreen] = useState<'workspace' | 'control-center' | 'ai-control' | 'session-control' | 'demo-validation' | 'session-review'>('workspace')
+  const [screen, setScreen] = useState<'workspace' | 'control-center' | 'ai-control' | 'session-control' | 'demo-validation' | 'session-review' | 'knowledge'>('workspace')
 
   return (
     <main>
@@ -69,6 +70,15 @@ export function App() {
         >
           Session Review
         </button>
+        <button
+          aria-pressed={screen === 'knowledge'}
+          onClick={() => {
+            setScreen('knowledge')
+          }}
+          type="button"
+        >
+          Knowledge Base
+        </button>
       </nav>
       {screen === 'workspace' ? <TradingWorkspacePage /> : null}
       {screen === 'control-center' ? <ControlCenterPage /> : null}
@@ -76,6 +86,7 @@ export function App() {
       {screen === 'session-control' ? <SessionControlPage /> : null}
       {screen === 'demo-validation' ? <DemoValidationPage /> : null}
       {screen === 'session-review' ? <SessionReviewPage /> : null}
+      {screen === 'knowledge' ? <KnowledgePage /> : null}
     </main>
   )
 }

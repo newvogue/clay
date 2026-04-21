@@ -12,6 +12,7 @@ from clay.ingestion.context.manager import ContextConnectorManager
 from clay.ingestion.market.binance_client import BinanceSpotClient
 from clay.ingestion.market.service import MarketIngestionService
 from clay.ingestion.service import IngestionCycleService
+from clay.knowledge.service import KnowledgeService
 from clay.preflight.service import PreflightService
 from clay.runtime.manager import RuntimeManager
 from clay.session_control.service import SessionControlService
@@ -125,4 +126,8 @@ session_review_service = SessionReviewService(
     audit_writer=audit_writer,
     event_bus=event_bus,
     ai_control_service=ai_control_service,
+)
+knowledge_service = KnowledgeService(
+    audit_writer=audit_writer,
+    event_bus=event_bus,
 )

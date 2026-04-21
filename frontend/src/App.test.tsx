@@ -7,6 +7,7 @@ describe('App', () => {
   let aiControlSnapshot: Record<string, any>
   let controlCenterSnapshot: Record<string, any>
   let demoTradingSnapshot: Record<string, any>
+  let knowledgeSnapshot: Record<string, any>
   let sessionReviewSnapshot: Record<string, any>
   let sessionControlSnapshot: Record<string, any>
   let workspaceSnapshot: Record<string, any>
@@ -276,6 +277,32 @@ describe('App', () => {
           awaiting_result: true,
         },
       ],
+    }
+    knowledgeSnapshot = {
+      summary: {
+        total_items: 1,
+        total_chunks: 2,
+        retrieval_mode: 'keyword_plus_metadata',
+        retrieval_policy: 'review and research only',
+        hot_path_dependency: false,
+        operator_message:
+          'Knowledge layer is available for research and review, but it stays outside the realtime signal path.',
+      },
+      recent_items: [
+        {
+          item_id: 1,
+          title: 'Momentum continuation rule',
+          category: 'strategy_rule',
+          priority: 'high',
+          tags: ['momentum', 'trend'],
+          source_type: 'manual',
+          content_preview: 'Use continuation entries only when higher timeframe structure supports the move.',
+          created_at: '2026-04-21T16:00:00Z',
+          updated_at: '2026-04-21T16:00:00Z',
+          chunk_count: 2,
+        },
+      ],
+      search_results: [],
     }
     sessionReviewSnapshot = {
       summary: {
@@ -580,6 +607,51 @@ describe('App', () => {
           demoTradingSnapshot.readiness.outcome_counts.matched = 1
           demoTradingSnapshot.readiness.outcome_counts.unresolved = 1
           return Promise.resolve(new Response(JSON.stringify(demoTradingSnapshot), { status: 200 }))
+        }
+
+        if (url.includes('/knowledge/overview') && method === 'GET') {
+          if (url.includes('query=momentum')) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  ...knowledgeSnapshot,
+                  search_results: [
+                    {
+                      item_id: 1,
+                      title: 'Momentum continuation rule',
+                      category: 'strategy_rule',
+                      priority: 'high',
+                      tags: ['momentum', 'trend'],
+                      score: 2.31,
+                      matched_chunk: 'Use continuation entries only when higher timeframe structure supports the move.',
+                      rationale:
+                        'strategy_rule content matched the query with priority high; retrieval remains advisory and does not affect live signal ranking.',
+                    },
+                  ],
+                }),
+                { status: 200 },
+              ),
+            )
+          }
+          return Promise.resolve(new Response(JSON.stringify(knowledgeSnapshot), { status: 200 }))
+        }
+
+        if (url.endsWith('/knowledge/items') && method === 'POST') {
+          knowledgeSnapshot.summary.total_items = 2
+          knowledgeSnapshot.summary.total_chunks = 4
+          knowledgeSnapshot.recent_items.unshift({
+            item_id: 2,
+            title: 'Pre-entry checklist',
+            category: 'checklist',
+            priority: 'high',
+            tags: ['checklist', 'entry'],
+            source_type: 'manual',
+            content_preview: 'Check liquidity. Confirm invalidation. Confirm market freshness.',
+            created_at: '2026-04-21T16:05:00Z',
+            updated_at: '2026-04-21T16:05:00Z',
+            chunk_count: 2,
+          })
+          return Promise.resolve(new Response(JSON.stringify(knowledgeSnapshot), { status: 200 }))
         }
 
         if (url.includes('/session-review/overview') && method === 'GET') {
@@ -905,5 +977,23 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: /mark useful/i }))
     expect(await screen.findByText(/feedback count: 1/i)).toBeInTheDocument()
     expect(await screen.findByText(/label: useful/i)).toBeInTheDocument()
+  })
+
+  it('renders knowledge base, ingests a sample, and searches knowledge', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /knowledge base/i }))
+    expect(await screen.findByRole('heading', { name: /knowledge base/i })).toBeInTheDocument()
+    expect(await screen.findByText(/retrieval mode: keyword_plus_metadata/i)).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /add checklist/i }))
+    expect(await screen.findByText(/total items: 2/i)).toBeInTheDocument()
+    expect(await screen.findByText(/pre-entry checklist/i)).toBeInTheDocument()
+
+    fireEvent.change(await screen.findByLabelText(/search knowledge/i), {
+      target: { value: 'momentum' },
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /search knowledge/i }))
+    expect(await screen.findByText(/retrieval remains advisory/i)).toBeInTheDocument()
   })
 })

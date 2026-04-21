@@ -11,6 +11,8 @@ from clay.api.routes.demo_trading_stream import router as demo_trading_stream_ro
 from clay.api.routes.events import router as events_router
 from clay.api.routes.health import router as health_router
 from clay.api.routes.ingestion import router as ingestion_router
+from clay.api.routes.knowledge import router as knowledge_router
+from clay.api.routes.knowledge_stream import router as knowledge_stream_router
 from clay.api.routes.market_data import router as market_data_router
 from clay.api.routes.preflight import router as preflight_router
 from clay.api.routes.runtime import router as runtime_router
@@ -42,6 +44,8 @@ def create_app() -> FastAPI:
     app.include_router(events_router)
     app.include_router(health_router)
     app.include_router(ingestion_router)
+    app.include_router(knowledge_router)
+    app.include_router(knowledge_stream_router)
     app.include_router(market_data_router)
     app.include_router(preflight_router)
     app.include_router(runtime_router)

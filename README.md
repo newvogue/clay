@@ -20,6 +20,7 @@ At the moment:
 - `E7` session lifecycle, briefing, pause, and pair replacement
 - `E8` demo trading integration and result tracking
 - `E9` audit trail, feedback, and session review
+- `E10` knowledge base and research layer
 
 ## E1 Progress
 
@@ -118,6 +119,17 @@ The current `E9` slice already includes:
 - `GET /session-review/overview` and `POST /session-review/feedback`;
 - `GET /session-review/stream` for live refresh events over `SSE`;
 - a frontend `Session Review` surface with review summary, filters, reviewed signals, feedback capture, and AI-assisted review cards.
+
+## E10 Progress
+
+The current `E10` slice already includes:
+
+- a backend `knowledge` domain for light-mode storage, semantic-ish chunking, and advisory retrieval;
+- persisted `knowledge.knowledge_items` and `knowledge.knowledge_chunks` storage with Alembic migration support;
+- `GET /knowledge/overview` and `POST /knowledge/items`;
+- `GET /knowledge/stream` for live refresh events over `SSE`;
+- a frontend `Knowledge Base` surface with quick-ingest, research search, recent items, and retrieval results;
+- an explicit policy that knowledge retrieval is advisory only and not part of the realtime signal hot path.
 
 ## Repository Layout
 
@@ -243,3 +255,12 @@ Copy `.env.example` if you want to override defaults for local development.
   - `POST /session-review/feedback`
   - `GET /session-review/stream`
 - AI-assisted review stays advisory only; strategy/model changes still require explicit confirmation.
+
+## E10 Notes
+
+- `Knowledge Base` in `v1` is a light mode for notes, strategy rules, checklists, and observations.
+- Current `E10` routes:
+  - `GET /knowledge/overview`
+  - `POST /knowledge/items`
+  - `GET /knowledge/stream`
+- retrieval is intentionally advisory and must not block signal ranking, session start, or demo validation flows.
