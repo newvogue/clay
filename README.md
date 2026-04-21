@@ -21,6 +21,7 @@ At the moment:
 - `E8` demo trading integration and result tracking
 - `E9` audit trail, feedback, and session review
 - `E10` knowledge base and research layer
+- `E11` backtesting, replay, and model/strategy activation
 
 ## E1 Progress
 
@@ -130,6 +131,17 @@ The current `E10` slice already includes:
 - `GET /knowledge/stream` for live refresh events over `SSE`;
 - a frontend `Knowledge Base` surface with quick-ingest, research search, recent items, and retrieval results;
 - an explicit policy that knowledge retrieval is advisory only and not part of the realtime signal hot path.
+
+## E11 Progress
+
+The current `E11` slice already includes:
+
+- a backend `validation_lab` domain for replay runs, validation summaries, staged activation review, and explicit apply flow;
+- persisted `validation.validation_runs` and `validation.activation_reviews` storage with Alembic migration support;
+- `GET /validation-lab/overview`, `POST /validation-lab/runs`, `POST /validation-lab/activation/review`, and `POST /validation-lab/activation/apply`;
+- `GET /validation-lab/stream` for live refresh events over `SSE`;
+- a frontend `Validation Lab` surface with replay actions, run history, review cards, and operator-confirmed activation apply;
+- an explicit policy that strategy/model activation must pass through replay evidence instead of silent switching.
 
 ## Repository Layout
 
@@ -264,3 +276,14 @@ Copy `.env.example` if you want to override defaults for local development.
   - `POST /knowledge/items`
   - `GET /knowledge/stream`
 - retrieval is intentionally advisory and must not block signal ranking, session start, or demo validation flows.
+
+## E11 Notes
+
+- `Validation Lab` is the staged validation layer between observed behavior and any strategy/model activation.
+- Current `E11` routes:
+  - `GET /validation-lab/overview`
+  - `POST /validation-lab/runs`
+  - `POST /validation-lab/activation/review`
+  - `POST /validation-lab/activation/apply`
+  - `GET /validation-lab/stream`
+- activation remains explicit and operator-confirmed; replay evidence can return `ready`, `staged`, or `blocked` posture before apply.

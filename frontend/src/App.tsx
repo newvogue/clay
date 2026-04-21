@@ -6,10 +6,11 @@ import { DemoValidationPage } from './features/demo-trading/demo-validation-page
 import { KnowledgePage } from './features/knowledge/knowledge-page'
 import { SessionControlPage } from './features/session-control/session-control-page'
 import { SessionReviewPage } from './features/session-review/session-review-page'
+import { ValidationLabPage } from './features/validation-lab/validation-lab-page'
 import { TradingWorkspacePage } from './features/workspace/trading-workspace-page'
 
 export function App() {
-  const [screen, setScreen] = useState<'workspace' | 'control-center' | 'ai-control' | 'session-control' | 'demo-validation' | 'session-review' | 'knowledge'>('workspace')
+  const [screen, setScreen] = useState<'workspace' | 'control-center' | 'ai-control' | 'session-control' | 'demo-validation' | 'session-review' | 'knowledge' | 'validation-lab'>('workspace')
 
   return (
     <main>
@@ -79,6 +80,15 @@ export function App() {
         >
           Knowledge Base
         </button>
+        <button
+          aria-pressed={screen === 'validation-lab'}
+          onClick={() => {
+            setScreen('validation-lab')
+          }}
+          type="button"
+        >
+          Validation Lab
+        </button>
       </nav>
       {screen === 'workspace' ? <TradingWorkspacePage /> : null}
       {screen === 'control-center' ? <ControlCenterPage /> : null}
@@ -87,6 +97,7 @@ export function App() {
       {screen === 'demo-validation' ? <DemoValidationPage /> : null}
       {screen === 'session-review' ? <SessionReviewPage /> : null}
       {screen === 'knowledge' ? <KnowledgePage /> : null}
+      {screen === 'validation-lab' ? <ValidationLabPage /> : null}
     </main>
   )
 }

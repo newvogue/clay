@@ -23,6 +23,8 @@ from clay.api.routes.session_stream import router as session_stream_router
 from clay.api.routes.signals import router as signals_router
 from clay.api.routes.shortlist import router as shortlist_router
 from clay.api.routes.services import router as services_router
+from clay.api.routes.validation_lab import router as validation_lab_router
+from clay.api.routes.validation_lab_stream import router as validation_lab_stream_router
 from clay.api.routes.workspace import router as workspace_router
 from clay.api.routes.workspace_stream import router as workspace_stream_router
 
@@ -56,6 +58,8 @@ def create_app() -> FastAPI:
     app.include_router(signals_router)
     app.include_router(shortlist_router)
     app.include_router(services_router)
+    app.include_router(validation_lab_router)
+    app.include_router(validation_lab_stream_router)
     app.include_router(workspace_router)
     app.include_router(workspace_stream_router)
     return app

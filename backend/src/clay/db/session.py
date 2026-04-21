@@ -11,6 +11,7 @@ SQLITE_SCHEMA_TRANSLATE_MAP = {
     "demo": None,
     "review": None,
     "knowledge": None,
+    "validation": None,
 }
 
 

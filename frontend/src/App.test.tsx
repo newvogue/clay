@@ -10,6 +10,7 @@ describe('App', () => {
   let knowledgeSnapshot: Record<string, any>
   let sessionReviewSnapshot: Record<string, any>
   let sessionControlSnapshot: Record<string, any>
+  let validationLabSnapshot: Record<string, any>
   let workspaceSnapshot: Record<string, any>
 
   beforeEach(() => {
@@ -303,6 +304,18 @@ describe('App', () => {
         },
       ],
       search_results: [],
+    }
+    validationLabSnapshot = {
+      summary: {
+        replay_ready: false,
+        activation_review_status: 'collecting',
+        total_runs: 0,
+        staged_review_count: 0,
+        operator_message:
+          'Validation Lab is waiting for the first replay run before any activation review.',
+      },
+      runs: [],
+      activation_reviews: [],
     }
     sessionReviewSnapshot = {
       summary: {
@@ -654,6 +667,92 @@ describe('App', () => {
           return Promise.resolve(new Response(JSON.stringify(knowledgeSnapshot), { status: 200 }))
         }
 
+        if (url.endsWith('/validation-lab/overview') && method === 'GET') {
+          return Promise.resolve(new Response(JSON.stringify(validationLabSnapshot), { status: 200 }))
+        }
+
+        if (url.endsWith('/validation-lab/runs') && method === 'POST') {
+          validationLabSnapshot.summary = {
+            replay_ready: true,
+            activation_review_status: 'ready',
+            total_runs: 1,
+            staged_review_count: 0,
+            operator_message:
+              'Replay evidence is healthy enough to prepare review cards for staged activation.',
+          }
+          validationLabSnapshot.runs = [
+            {
+              run_id: 1,
+              run_type: 'strategy_replay',
+              label: 'strategy_replay replay',
+              strategy_mode: 'momentum',
+              model_version: 'openai-gpt-5.4',
+              period_start: '2026-04-14T12:00:00Z',
+              period_end: '2026-04-21T12:00:00Z',
+              trades_simulated: 8,
+              win_rate: 0.61,
+              net_pnl_pct: 3.4,
+              max_drawdown_pct: 1.8,
+              decision_quality_score: 0.82,
+              summary:
+                'strategy_replay completed around BTCUSDT; session review status is review_ready; net pnl 3.40% with decision quality 0.82.',
+              created_at: '2026-04-21T12:00:00Z',
+            },
+          ]
+          return Promise.resolve(new Response(JSON.stringify(validationLabSnapshot), { status: 200 }))
+        }
+
+        if (url.endsWith('/validation-lab/activation/review') && method === 'POST') {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                review_id: 'validation-review-1',
+                target_type: 'strategy_mode',
+                target_id: 'global-strategy',
+                current_value: 'momentum',
+                proposed_value: 'defensive',
+                status: 'ready',
+                severity: 'info',
+                summary:
+                  'strategy_mode review for global-strategy: move from momentum to defensive; posture is ready with info severity.',
+                evidence: {
+                  latest_run_id: 1,
+                  latest_run_type: 'strategy_replay',
+                  net_pnl_pct: 3.4,
+                },
+                created_at: '2026-04-21T12:05:00Z',
+                applied_at: null,
+              }),
+              { status: 200 },
+            ),
+          )
+        }
+
+        if (url.endsWith('/validation-lab/activation/apply') && method === 'POST') {
+          validationLabSnapshot.activation_reviews = [
+            {
+              review_id: 'validation-review-1',
+              target_type: 'strategy_mode',
+              target_id: 'global-strategy',
+              current_value: 'momentum',
+              proposed_value: 'defensive',
+              status: 'applied',
+              severity: 'info',
+              summary:
+                'strategy_mode review for global-strategy: move from momentum to defensive; posture is ready with info severity.',
+              evidence: {
+                latest_run_id: 1,
+                latest_run_type: 'strategy_replay',
+                net_pnl_pct: 3.4,
+              },
+              created_at: '2026-04-21T12:05:00Z',
+              applied_at: '2026-04-21T12:06:00Z',
+            },
+          ]
+          validationLabSnapshot.summary.activation_review_status = 'applied'
+          return Promise.resolve(new Response(JSON.stringify(validationLabSnapshot), { status: 200 }))
+        }
+
         if (url.includes('/session-review/overview') && method === 'GET') {
           if (url.includes('pair=BTCUSDT')) {
             return Promise.resolve(
@@ -995,5 +1094,23 @@ describe('App', () => {
     })
     fireEvent.click(await screen.findByRole('button', { name: /search knowledge/i }))
     expect(await screen.findByText(/retrieval remains advisory/i)).toBeInTheDocument()
+  })
+
+  it('renders validation lab, runs replay, and applies activation review', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /validation lab/i }))
+    expect(await screen.findByRole('heading', { name: /validation lab/i })).toBeInTheDocument()
+    expect(await screen.findByText(/waiting for the first replay run/i)).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /run strategy replay/i }))
+    expect(await screen.findByText(/total runs: 1/i)).toBeInTheDocument()
+    expect(await screen.findByText(/strategy_replay replay/i)).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /review strategy activation/i }))
+    expect(await screen.findByText(/move from momentum to defensive/i)).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /apply activation review/i }))
+    expect(await screen.findAllByText(/status: applied/i)).not.toHaveLength(0)
   })
 })

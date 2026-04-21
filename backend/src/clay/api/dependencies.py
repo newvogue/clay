@@ -16,6 +16,7 @@ from clay.bootstrap import (
     session_control_service,
     session_review_service,
     signal_engine_service,
+    validation_lab_service,
     workspace_service,
 )
 from clay.ai_control.service import AIControlService
@@ -30,6 +31,7 @@ from clay.session_control.service import SessionControlService
 from clay.session_review.service import SessionReviewService
 from clay.signal_engine.service import SignalEngineService
 from clay.settings.ingestion import IngestionSettings
+from clay.validation_lab.service import ValidationLabService
 from clay.workspace.service import WorkspaceService
 
 
@@ -92,3 +94,7 @@ def get_session_review_service() -> SessionReviewService:
 
 def get_knowledge_service() -> KnowledgeService:
     return knowledge_service
+
+
+def get_validation_lab_service() -> ValidationLabService:
+    return validation_lab_service

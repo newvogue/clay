@@ -22,6 +22,7 @@ from clay.services.registry import ServiceRegistry
 from clay.services.supervisor import ProcessSupervisor
 from clay.signal_engine.service import SignalEngineService
 from clay.settings.ingestion import IngestionSettings
+from clay.validation_lab.service import ValidationLabService
 from clay.workspace.service import WorkspaceService
 
 
@@ -128,6 +129,13 @@ session_review_service = SessionReviewService(
     ai_control_service=ai_control_service,
 )
 knowledge_service = KnowledgeService(
+    audit_writer=audit_writer,
+    event_bus=event_bus,
+)
+validation_lab_service = ValidationLabService(
+    signal_engine_service=signal_engine_service,
+    ai_control_service=ai_control_service,
+    session_review_service=session_review_service,
     audit_writer=audit_writer,
     event_bus=event_bus,
 )

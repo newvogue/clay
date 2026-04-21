@@ -6,6 +6,7 @@ from clay.db.models_context import NewsItem, SentimentSnapshot
 from clay.db.models_market import MarketBar, MarketFreshnessStatus, OrderBookSummary
 from clay.db.models_ops import ConnectorStatusHistory, IngestRun, SourceHealthEvent
 from clay.db.models_review import SignalFeedback
+from clay.db.models_validation import ActivationReview, ValidationRun
 from clay.db.session import build_engine, build_session_factory
 from clay.settings.ingestion import IngestionSettings
 
@@ -76,3 +77,8 @@ def test_review_schema_contains_expected_tables() -> None:
 def test_knowledge_schema_contains_expected_tables() -> None:
     assert KnowledgeItem.__tablename__ == "knowledge_items"
     assert KnowledgeChunk.__tablename__ == "knowledge_chunks"
+
+
+def test_validation_schema_contains_expected_tables() -> None:
+    assert ValidationRun.__tablename__ == "validation_runs"
+    assert ActivationReview.__tablename__ == "activation_reviews"
