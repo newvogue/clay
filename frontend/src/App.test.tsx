@@ -1065,6 +1065,7 @@ describe('App', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    window.history.replaceState(null, '', '/')
   })
 
   it('renders the runtime foundation shell with live overview data', async () => {

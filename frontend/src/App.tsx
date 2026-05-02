@@ -17,6 +17,25 @@ import { ValidationLabPage } from './features/validation-lab/validation-lab-page
 import { TradingWorkspacePage } from './features/workspace/trading-workspace-page'
 import type { ControlCenterSnapshot } from './types/control-center'
 
+const appScreens: AppScreen[] = [
+  'overview',
+  'workspace',
+  'session-control',
+  'control-center',
+  'ai-control',
+  'demo-validation',
+  'validation-lab',
+  'session-review',
+  'knowledge',
+  'reliability',
+  'settings',
+]
+
+function resolveScreenFromHash(): AppScreen {
+  const hashScreen = window.location.hash.replace(/^#/, '')
+  return appScreens.includes(hashScreen as AppScreen) ? (hashScreen as AppScreen) : 'overview'
+}
+
 function resolveConsensusStatus(snapshot: ControlCenterSnapshot | null): 'agreement' | 'partial' | 'conflict' {
   if (!snapshot) {
     return 'partial'
@@ -50,7 +69,7 @@ function resolveMissionStatus(snapshot: ControlCenterSnapshot | null) {
 }
 
 export function App() {
-  const [screen, setScreen] = useState<AppScreen>('overview')
+  const [screen, setScreen] = useState<AppScreen>(() => resolveScreenFromHash())
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const savedTheme = window.localStorage.getItem('clay-theme')
@@ -73,6 +92,23 @@ export function App() {
       window.clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    function handleHashChange() {
+      setScreen(resolveScreenFromHash())
+    }
+
+    window.addEventListener('hashchange', handleHashChange)
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (window.location.hash !== `#${screen}`) {
+      window.history.replaceState(null, '', `#${screen}`)
+    }
+  }, [screen])
 
   useEffect(() => {
     let isMounted = true
@@ -187,7 +223,7 @@ export function App() {
               animate={{ opacity: 1, y: 0 }}
               className="screen-content"
               exit={{ opacity: 0, y: -8 }}
-              initial={{ opacity: 0, y: 8 }}
+              initial={false}
               key={screen}
               transition={{ duration: 0.18, ease: 'easeOut' }}
             >
