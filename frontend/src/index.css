@@ -1140,6 +1140,415 @@
   .control-config-card button {
     @apply mt-3;
   }
+
+  .ai-control-page {
+    @apply auto-rows-min gap-4;
+  }
+
+  .ai-control-header {
+    @apply bg-transparent;
+  }
+
+  .ai-control-command-row {
+    @apply flex flex-wrap items-center justify-end gap-2;
+  }
+
+  .ai-control-command-row > span:last-child {
+    @apply rounded border border-clay-border bg-clay-card px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-clay-muted;
+  }
+
+  .ai-control-tabs {
+    @apply flex items-center gap-6 border-b border-clay-border/40 bg-clay-card/20 px-1;
+  }
+
+  .ai-control-tabs button {
+    @apply rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-3.5 text-[9px] font-bold uppercase tracking-[0.2em] text-clay-muted hover:bg-transparent hover:text-clay-text;
+  }
+
+  .ai-control-tabs button.is-active {
+    @apply border-clay-accent text-clay-accent;
+  }
+
+  .ai-control-error-panel {
+    @apply flex items-center gap-3 border-clay-danger/30 bg-clay-danger/5 text-clay-danger;
+  }
+
+  .ai-overview-grid {
+    @apply grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4;
+  }
+
+  .ai-metric-card {
+    @apply flex items-center gap-3 rounded-md border border-clay-border/60 bg-clay-card p-3;
+  }
+
+  .ai-metric-icon,
+  .ai-role-icon {
+    @apply flex shrink-0 items-center justify-center rounded border bg-clay-bg/50;
+  }
+
+  .ai-metric-icon {
+    @apply h-9 w-9;
+  }
+
+  .ai-role-icon {
+    @apply h-10 w-10;
+  }
+
+  .ai-metric-icon.is-success,
+  .ai-role-icon.is-success {
+    @apply border-clay-success/20 bg-clay-success/10 text-clay-success;
+  }
+
+  .ai-metric-icon.is-warning,
+  .ai-role-icon.is-warning {
+    @apply border-clay-warning/20 bg-clay-warning/10 text-clay-warning;
+  }
+
+  .ai-metric-icon.is-danger,
+  .ai-role-icon.is-danger {
+    @apply border-clay-danger/20 bg-clay-danger/10 text-clay-danger;
+  }
+
+  .ai-metric-icon.is-muted,
+  .ai-role-icon.is-muted {
+    @apply border-clay-border/50 bg-clay-bg/40 text-clay-muted;
+  }
+
+  .ai-metric-body {
+    @apply min-w-0 flex-1;
+  }
+
+  .ai-metric-body > div:first-child {
+    @apply mb-1.5 flex items-center justify-between gap-3;
+  }
+
+  .ai-metric-body span,
+  .ai-current-model span,
+  .ai-confidence-row span,
+  .ai-assignment-card-header span,
+  .ai-assignment-actions span,
+  .ai-fallback-card span,
+  .ai-conflict-card span,
+  .ai-review-card-header span,
+  .ai-review-models span,
+  .ai-role-token-list > span,
+  .ai-fallback-mode-card span,
+  .ai-review-queue span,
+  .ai-terminal-title strong {
+    @apply text-[10px] font-bold uppercase tracking-[0.12em] text-clay-muted;
+  }
+
+  .ai-metric-body strong {
+    @apply truncate font-mono text-xs font-bold text-clay-text;
+  }
+
+  .ai-metric-track,
+  .ai-confidence-track {
+    @apply h-1 overflow-hidden rounded bg-clay-bg/70;
+  }
+
+  .ai-metric-track span,
+  .ai-confidence-track span {
+    @apply block h-full rounded transition-all;
+  }
+
+  .ai-metric-track span.is-success,
+  .ai-confidence-track span {
+    @apply bg-clay-success;
+  }
+
+  .ai-metric-track span.is-warning {
+    @apply bg-clay-warning;
+  }
+
+  .ai-metric-track span.is-danger {
+    @apply bg-clay-danger;
+  }
+
+  .ai-metric-track span.is-muted {
+    @apply bg-clay-muted;
+  }
+
+  .ai-orchestration-grid,
+  .ai-consensus-grid {
+    @apply grid grid-cols-1 gap-4 xl:grid-cols-12;
+  }
+
+  .ai-assignments-panel,
+  .ai-consensus-main {
+    @apply xl:col-span-8;
+  }
+
+  .ai-side-stack,
+  .ai-consensus-side {
+    @apply space-y-4 xl:col-span-4;
+  }
+
+  .ai-panel-title {
+    @apply mb-4 flex items-start justify-between gap-3 border-b border-clay-border/50 pb-3;
+  }
+
+  .ai-panel-title > div > span {
+    @apply block text-[9px] font-bold uppercase tracking-[0.18em] text-clay-muted;
+  }
+
+  .ai-panel-title h2 {
+    @apply mb-1 mt-1 text-sm font-bold text-clay-text;
+  }
+
+  .ai-panel-title p {
+    @apply max-w-2xl text-[11px] font-medium leading-5 text-clay-text-muted;
+  }
+
+  .ai-empty-line {
+    @apply rounded border border-dashed border-clay-border bg-clay-bg/35 px-3 py-5 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-clay-muted;
+  }
+
+  .ai-assignment-grid {
+    @apply grid grid-cols-1 gap-3 lg:grid-cols-2;
+  }
+
+  .ai-assignment-card,
+  .ai-fallback-card,
+  .ai-conflict-card,
+  .ai-review-card,
+  .ai-role-card,
+  .ai-consensus-clear,
+  .ai-consensus-conflict,
+  .ai-fallback-mode-card,
+  .ai-review-queue article {
+    @apply rounded border border-clay-border/60 bg-clay-bg/35 p-4;
+  }
+
+  .ai-assignment-card.is-success {
+    @apply border-clay-success/20;
+  }
+
+  .ai-assignment-card.is-warning {
+    @apply border-clay-warning/20;
+  }
+
+  .ai-assignment-card.is-danger {
+    @apply border-clay-danger/20;
+  }
+
+  .ai-assignment-card-header {
+    @apply mb-3 flex items-start gap-3;
+  }
+
+  .ai-assignment-card-header > div:nth-child(2) {
+    @apply min-w-0 flex-1;
+  }
+
+  .ai-assignment-card-header h3 {
+    @apply mb-1 truncate text-xs font-bold normal-case tracking-normal text-clay-text;
+  }
+
+  .ai-current-model {
+    @apply mb-3 rounded border border-clay-border/50 bg-clay-card/35 px-3 py-2;
+  }
+
+  .ai-current-model strong,
+  .ai-confidence-row strong,
+  .ai-review-models strong,
+  .ai-role-card strong,
+  .ai-consensus-clear strong,
+  .ai-consensus-conflict strong,
+  .ai-review-queue strong {
+    @apply block text-xs font-bold text-clay-text;
+  }
+
+  .ai-current-model strong {
+    @apply mt-1 truncate;
+  }
+
+  .ai-assignment-card p,
+  .ai-fallback-card p,
+  .ai-conflict-card p,
+  .ai-review-card p,
+  .ai-role-card p,
+  .ai-consensus-clear span,
+  .ai-consensus-conflict p,
+  .ai-consensus-conflict span {
+    @apply text-[11px] font-medium leading-5 text-clay-text-muted;
+  }
+
+  .ai-confidence-row {
+    @apply my-3 space-y-2;
+  }
+
+  .ai-confidence-row > div:first-child {
+    @apply flex items-center justify-between gap-3;
+  }
+
+  .ai-assignment-actions {
+    @apply flex flex-wrap items-center gap-2 border-t border-clay-border/40 pt-3;
+  }
+
+  .ai-assignment-actions button,
+  .ai-review-card button {
+    @apply inline-flex items-center justify-center gap-2 uppercase tracking-[0.16em];
+  }
+
+  .ai-assignment-actions span {
+    @apply rounded border border-dashed border-clay-border px-3 py-2;
+  }
+
+  .ai-fallback-card,
+  .ai-review-card {
+    @apply space-y-3;
+  }
+
+  .ai-fallback-card > div,
+  .ai-conflict-card > div,
+  .ai-review-card-header {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .ai-conflict-list {
+    @apply mt-3 space-y-2;
+  }
+
+  .ai-conflict-card.is-warning {
+    @apply border-clay-warning/25 bg-clay-warning/5;
+  }
+
+  .ai-conflict-card.is-critical {
+    @apply border-clay-danger/25 bg-clay-danger/5;
+  }
+
+  .ai-conflict-card strong {
+    @apply text-xs font-bold text-clay-text;
+  }
+
+  .ai-review-models {
+    @apply grid grid-cols-1 gap-2 md:grid-cols-2;
+  }
+
+  .ai-review-models > div {
+    @apply rounded border border-clay-border/50 bg-clay-card/35 px-3 py-2;
+  }
+
+  .ai-review-list h3 {
+    @apply mb-2 text-[9px] font-bold uppercase tracking-[0.18em] text-clay-muted;
+  }
+
+  .ai-review-list ul {
+    @apply space-y-2;
+  }
+
+  .ai-review-list li {
+    @apply border-clay-border/50 bg-clay-card/35 text-[11px] text-clay-text-muted;
+  }
+
+  .ai-roles-panel {
+    @apply overflow-hidden;
+  }
+
+  .ai-role-grid {
+    @apply grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .ai-role-card {
+    @apply space-y-3;
+  }
+
+  .ai-role-card > div:first-child {
+    @apply flex items-center gap-2;
+  }
+
+  .ai-role-token-list {
+    @apply space-y-2;
+  }
+
+  .ai-role-token-list div {
+    @apply flex flex-wrap gap-1.5;
+  }
+
+  .ai-role-token-list em {
+    @apply rounded border border-clay-border/50 bg-clay-card/35 px-2 py-1 text-[9px] font-bold not-italic text-clay-muted;
+  }
+
+  .ai-consensus-conflicts {
+    @apply space-y-3;
+  }
+
+  .ai-consensus-clear {
+    @apply flex flex-col items-center gap-3 py-12 text-center;
+  }
+
+  .ai-consensus-conflict > div {
+    @apply mb-3 flex flex-wrap items-center gap-2;
+  }
+
+  .ai-fallback-mode-card,
+  .ai-review-queue {
+    @apply space-y-2;
+  }
+
+  .ai-fallback-mode-card {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .ai-review-queue article span {
+    @apply mt-1 block normal-case tracking-normal;
+  }
+
+  .ai-terminal-panel {
+    @apply min-h-[calc(100vh-12rem)] overflow-hidden p-0;
+  }
+
+  .ai-terminal-title {
+    @apply flex items-center justify-between gap-3 border-b border-clay-border bg-clay-bg/30 px-4 py-3;
+  }
+
+  .ai-terminal-title div {
+    @apply flex items-center gap-2;
+  }
+
+  .ai-terminal-title span {
+    @apply text-[10px] font-bold uppercase tracking-[0.2em] text-clay-text;
+  }
+
+  .ai-terminal-body {
+    @apply min-h-[28rem] space-y-2 bg-clay-bg p-5 font-mono text-[10px] font-bold tracking-tight;
+  }
+
+  .ai-terminal-body p {
+    @apply text-[10px] leading-5 text-clay-muted;
+  }
+
+  .ai-terminal-body p span {
+    @apply mr-3 inline-block w-24 text-clay-muted/55;
+  }
+
+  .ai-terminal-body p strong {
+    @apply mr-3 text-[10px];
+  }
+
+  .ai-terminal-body p strong.is-accent {
+    @apply text-clay-accent;
+  }
+
+  .ai-terminal-body p strong.is-success {
+    @apply text-clay-success;
+  }
+
+  .ai-terminal-body p strong.is-warning {
+    @apply text-clay-warning;
+  }
+
+  .ai-terminal-input {
+    @apply relative border-t border-clay-border/60 bg-clay-bg/50 p-4;
+  }
+
+  .ai-terminal-input input {
+    @apply w-full rounded border border-clay-border/60 bg-clay-bg/50 px-4 py-2.5 pr-24 font-mono text-[10px] font-bold tracking-[0.16em] text-clay-text placeholder:text-clay-muted/50;
+  }
+
+  .ai-terminal-input span {
+    @apply absolute right-7 top-1/2 -translate-y-1/2 rounded border border-clay-border/60 bg-clay-card px-2 py-1 font-mono text-[8px] font-bold uppercase tracking-[0.18em] text-clay-muted;
+  }
 }
 
 @media (max-width: 1280px) {
