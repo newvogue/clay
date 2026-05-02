@@ -11,6 +11,7 @@
 
 - `planning/` - минимальный набор planning-документов, который уже был импортирован в implementation repository.
 - `mission-control/` - полный snapshot папки `CLAY_Mission_Control` из Obsidian.
+- `ui-references/` - распакованные visual reference exports от Gemini для UI-pass.
 - `development/` - handoff-документы, текущий статус разработки, точки остановки и следующие шаги.
 
 ## Источник Snapshot
