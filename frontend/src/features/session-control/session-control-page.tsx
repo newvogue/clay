@@ -95,16 +95,20 @@ export function SessionControlPage() {
         <div className="session-command-row">
           <StatusBadge label={lifecycle?.lifecycle_state ?? (sessionControl.isLoading ? 'loading' : 'unknown')} />
           <StatusBadge label={preflight?.status ?? 'preflight_pending'} />
-          <button
-            disabled={sessionControl.isActing || !preflight || preflight.status !== 'pass'}
-            onClick={() => {
-              void sessionControl.startSession()
-            }}
-            type="button"
-          >
-            <Zap className="h-3.5 w-3.5" />
-            Start session
-          </button>
+          {sessionControl.isLoading || !preflight ? (
+            <span className="session-start-placeholder">Start pending</span>
+          ) : (
+            <button
+              disabled={sessionControl.isActing || preflight.status !== 'pass'}
+              onClick={() => {
+                void sessionControl.startSession()
+              }}
+              type="button"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              Start session
+            </button>
+          )}
         </div>
       </header>
 
@@ -425,8 +429,8 @@ type TargetConsoleProps = {
 }
 
 function TargetConsole({ lifecycle, briefing, primarySignal }: TargetConsoleProps) {
-  const currentPair = lifecycle?.current_pair_symbol ?? primarySignal?.symbol ?? 'not selected'
-  const targetLabel = currentPair === 'not selected' ? 'standby' : currentPair
+  const currentPair = lifecycle?.current_pair_symbol ?? 'not selected'
+  const targetLabel = lifecycle?.current_pair_symbol ?? primarySignal?.symbol ?? 'standby'
 
   return (
     <section className="session-target-console">
