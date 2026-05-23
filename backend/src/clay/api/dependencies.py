@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from clay.bootstrap import (
     ai_control_service,
+    alpha_readiness_service,
     control_center_service,
     context_connector_manager,
     demo_trading_service,
@@ -21,6 +22,7 @@ from clay.bootstrap import (
     workspace_service,
 )
 from clay.ai_control.service import AIControlService
+from clay.alpha.service import AlphaReadinessService
 from clay.control_center.service import ControlCenterService
 from clay.demo_trading.service import DemoTradingService
 from clay.events.bus import EventBus
@@ -104,3 +106,7 @@ def get_validation_lab_service() -> ValidationLabService:
 
 def get_reliability_service() -> ReliabilityService:
     return reliability_service
+
+
+def get_alpha_readiness_service() -> AlphaReadinessService:
+    return alpha_readiness_service

@@ -1,4 +1,5 @@
 from clay.ai_control.service import AIControlService
+from clay.alpha.service import AlphaReadinessService
 from clay.audit.writer import AuditWriter
 from clay.config.loader import ConfigLoader
 from clay.control_center.service import ControlCenterService
@@ -148,4 +149,12 @@ reliability_service = ReliabilityService(
     validation_lab_service=validation_lab_service,
     audit_writer=audit_writer,
     event_bus=event_bus,
+)
+alpha_readiness_service = AlphaReadinessService(
+    workspace_service=workspace_service,
+    session_control_service=session_control_service,
+    demo_trading_service=demo_trading_service,
+    session_review_service=session_review_service,
+    validation_lab_service=validation_lab_service,
+    reliability_service=reliability_service,
 )
