@@ -28,6 +28,9 @@ class AlphaOperatorStepSnapshot(BaseModel):
     label: str
     status: AlphaGateStatus
     detail: str
+    target_screen: str
+    action_label: str
+    is_next: bool
 
 
 class AlphaReadinessEvidence(BaseModel):
@@ -50,4 +53,3 @@ class AlphaReadinessSnapshot(BaseModel):
     gates: list[AlphaReadinessGateSnapshot]
     operator_steps: list[AlphaOperatorStepSnapshot]
     evidence: AlphaReadinessEvidence
-

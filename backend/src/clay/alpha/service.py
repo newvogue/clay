@@ -212,7 +212,7 @@ class AlphaReadinessService:
         elif reliability_snapshot.summary.release_readiness_status == "needs_attention":
             reliability_step_status = "warn"
 
-        return [
+        steps = [
             AlphaOperatorStepSnapshot(
                 step_id="check_preflight",
                 label="Check preflight",
@@ -222,6 +222,9 @@ class AlphaReadinessService:
                     if session_snapshot.preflight.status == "pass"
                     else session_snapshot.preflight.blocking_reason or "Preflight is blocked."
                 ),
+                target_screen="session-control",
+                action_label="Review preflight",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="focus_signal",
@@ -237,6 +240,9 @@ class AlphaReadinessService:
                     if workspace_snapshot.focus_pair.active_signal_id is not None
                     else "No focused signal is available."
                 ),
+                target_screen="workspace",
+                action_label="Open workspace",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="start_or_resume_session",
@@ -249,6 +255,9 @@ class AlphaReadinessService:
                     if session_snapshot.lifecycle.can_start
                     else session_snapshot.preflight.blocking_reason or "Session start is blocked."
                 ),
+                target_screen="session-control",
+                action_label="Start session",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="log_demo_decision",
@@ -259,31 +268,59 @@ class AlphaReadinessService:
                     if demo_log_status == "pass"
                     else demo_snapshot.active_session.blocking_reason or "Demo decision logging is waiting on an active session."
                 ),
+                target_screen="demo-validation",
+                action_label="Log demo decision",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="resolve_demo_result",
                 label="Resolve demo result",
                 status="pass" if demo_snapshot.readiness.resolved_record_count > 0 else "warn",
                 detail=f"{demo_snapshot.readiness.resolved_record_count} demo records are resolved.",
+                target_screen="demo-validation",
+                action_label="Resolve demo result",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="review_feedback",
                 label="Review feedback",
                 status="pass" if review_snapshot.summary.feedback_count > 0 else "warn",
                 detail=f"{review_snapshot.summary.feedback_count} review feedback items are captured.",
+                target_screen="session-review",
+                action_label="Capture review feedback",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="run_validation_replay",
                 label="Run validation replay",
                 status="pass" if validation_snapshot.summary.replay_ready else "warn",
                 detail=validation_snapshot.summary.operator_message,
+                target_screen="validation-lab",
+                action_label="Run validation replay",
+                is_next=False,
             ),
             AlphaOperatorStepSnapshot(
                 step_id="recheck_reliability",
                 label="Recheck reliability",
                 status=reliability_step_status,
                 detail=reliability_snapshot.summary.operator_message,
+                target_screen="reliability",
+                action_label="Recheck reliability",
+                is_next=False,
             ),
+        ]
+        return self._mark_next_operator_step(steps)
+
+    def _mark_next_operator_step(
+        self,
+        steps: list[AlphaOperatorStepSnapshot],
+    ) -> list[AlphaOperatorStepSnapshot]:
+        next_step = next((step for step in steps if step.status != "pass"), None)
+        if next_step is None:
+            return steps
+        return [
+            step.model_copy(update={"is_next": step.step_id == next_step.step_id})
+            for step in steps
         ]
 
     def _build_summary(self, gates: list[AlphaReadinessGateSnapshot]) -> AlphaReadinessSummary:

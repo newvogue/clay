@@ -175,24 +175,36 @@ describe('App', () => {
           label: 'Check preflight',
           status: 'pass',
           detail: 'Preflight is clear.',
+          target_screen: 'session-control',
+          action_label: 'Review preflight',
+          is_next: false,
         },
         {
           step_id: 'focus_signal',
           label: 'Focus signal',
           status: 'pass',
           detail: 'Focused on BTCUSDT.',
+          target_screen: 'workspace',
+          action_label: 'Open workspace',
+          is_next: false,
         },
         {
           step_id: 'start_or_resume_session',
           label: 'Start or resume session',
           status: 'warn',
           detail: 'Session is ready to start.',
+          target_screen: 'session-control',
+          action_label: 'Start session',
+          is_next: true,
         },
         {
           step_id: 'run_validation_replay',
           label: 'Run validation replay',
           status: 'warn',
           detail: 'Validation Lab is waiting for the first replay run before any activation review.',
+          target_screen: 'validation-lab',
+          action_label: 'Run validation replay',
+          is_next: false,
         },
       ],
       evidence: {
@@ -1163,6 +1175,7 @@ describe('App', () => {
     expect(screen.getByRole('heading', { name: /active strategy/i })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /system status/i })).toBeInTheDocument()
     expect(await screen.findByText(/operator path ready/i)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /continue alpha path with start session/i })).toBeInTheDocument()
     expect((await screen.findAllByText(/BTCUSDT/i)).length).toBeGreaterThan(0)
   })
 

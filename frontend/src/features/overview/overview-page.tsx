@@ -165,8 +165,8 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
           <AlphaReadinessPanel
             error={alpha.error}
             isLoading={alpha.isLoading}
-            onNavigateSession={() => {
-              onNavigate('session-control')
+            onNavigateTarget={(targetScreen) => {
+              onNavigate(resolveAlphaTargetScreen(targetScreen))
             }}
             onRefresh={() => {
               void alpha.refresh()
@@ -295,7 +295,7 @@ type AlphaReadinessPanelProps = {
   isLoading: boolean
   error: string | null
   onRefresh: () => void
-  onNavigateSession: () => void
+  onNavigateTarget: (targetScreen: string) => void
 }
 
 function AlphaReadinessPanel({
@@ -303,12 +303,13 @@ function AlphaReadinessPanel({
   isLoading,
   error,
   onRefresh,
-  onNavigateSession,
+  onNavigateTarget,
 }: AlphaReadinessPanelProps) {
   const summary = snapshot?.summary ?? null
   const evidence = snapshot?.evidence ?? null
   const gates = prioritizeAlphaItems(snapshot?.gates ?? []).slice(0, 5)
   const operatorSteps = prioritizeAlphaItems(snapshot?.operator_steps ?? []).slice(0, 5)
+  const nextStep = snapshot?.operator_steps.find((step) => step.is_next) ?? null
 
   return (
     <section aria-label="alpha-readiness-panel" className="overview-panel alpha-readiness-panel">
@@ -327,11 +328,16 @@ function AlphaReadinessPanel({
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
           <button
-            aria-label="Open alpha session workflow"
-            onClick={onNavigateSession}
+            aria-label={nextStep ? `Continue alpha path with ${nextStep.action_label}` : 'Continue alpha path'}
+            disabled={!nextStep}
+            onClick={() => {
+              if (nextStep) {
+                onNavigateTarget(nextStep.target_screen)
+              }
+            }}
             type="button"
           >
-            <ListChecks className="h-3 w-3" /> Session
+            <ListChecks className="h-3 w-3" /> {nextStep?.action_label ?? 'Continue'}
           </button>
         </div>
       </div>
@@ -428,6 +434,7 @@ function AlphaStepRow({ step }: { step: AlphaOperatorStepSnapshot }) {
       <div>
         <strong>{step.label}</strong>
         <p>{step.detail}</p>
+        <em>{step.action_label}</em>
       </div>
       <StatusBadge label={step.status} />
     </article>
@@ -484,4 +491,16 @@ function prioritizeAlphaItems<T extends { status: AlphaGateStatus }>(items: T[])
     pass: 2,
   }
   return [...items].sort((left, right) => rank[left.status] - rank[right.status])
+}
+
+function resolveAlphaTargetScreen(targetScreen: string): AppScreen {
+  const allowedTargets: AppScreen[] = [
+    'workspace',
+    'session-control',
+    'demo-validation',
+    'session-review',
+    'validation-lab',
+    'reliability',
+  ]
+  return allowedTargets.includes(targetScreen as AppScreen) ? (targetScreen as AppScreen) : 'overview'
 }

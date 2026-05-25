@@ -373,6 +373,10 @@
     -webkit-line-clamp: 2;
   }
 
+  .alpha-readiness-row em {
+    @apply mt-1 block text-[8px] font-bold not-italic uppercase tracking-[0.16em] text-clay-accent;
+  }
+
   .dense-list {
     @apply space-y-2.5;
   }

@@ -23,6 +23,9 @@ export type AlphaOperatorStepSnapshot = {
   label: string
   status: AlphaGateStatus
   detail: string
+  target_screen: string
+  action_label: string
+  is_next: boolean
 }
 
 export type AlphaReadinessEvidence = {
@@ -46,4 +49,3 @@ export type AlphaReadinessSnapshot = {
   operator_steps: AlphaOperatorStepSnapshot[]
   evidence: AlphaReadinessEvidence
 }
-

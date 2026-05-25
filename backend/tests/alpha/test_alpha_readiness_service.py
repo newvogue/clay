@@ -247,6 +247,10 @@ def test_alpha_readiness_blocks_without_fresh_inputs(db_session, tmp_path: Path)
     assert snapshot.summary.operator_path_ready is False
     assert any(gate.gate_id == "preflight-ready" and gate.status == "fail" for gate in snapshot.gates)
     assert any(gate.gate_id == "focused-signal" and gate.blocks_alpha for gate in snapshot.gates)
+    next_steps = [step for step in snapshot.operator_steps if step.is_next]
+    assert len(next_steps) == 1
+    assert next_steps[0].step_id == "check_preflight"
+    assert next_steps[0].target_screen == "session-control"
 
 
 def test_alpha_readiness_opens_operator_path_when_session_can_run(db_session, tmp_path: Path) -> None:
@@ -261,6 +265,9 @@ def test_alpha_readiness_opens_operator_path_when_session_can_run(db_session, tm
     assert snapshot.summary.blocking_gate_count == 0
     assert snapshot.evidence.session_lifecycle_state == "active_session"
     assert any(step.step_id == "log_demo_decision" and step.status == "pass" for step in snapshot.operator_steps)
+    next_step = next(step for step in snapshot.operator_steps if step.is_next)
+    assert next_step.step_id == "resolve_demo_result"
+    assert next_step.action_label == "Resolve demo result"
 
 
 def test_alpha_readiness_surfaces_evidence_gates(db_session, tmp_path: Path) -> None:
@@ -290,3 +297,4 @@ def test_alpha_overview_route_returns_snapshot_payload(db_session, tmp_path: Pat
     assert payload["summary"]["operator_path_ready"] is True
     assert payload["evidence"]["focus_symbol"] == "BTCUSDT"
     assert payload["gates"]
+    assert any(step["is_next"] and step["target_screen"] == "session-control" for step in payload["operator_steps"])
