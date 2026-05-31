@@ -13,9 +13,11 @@ describe('App', () => {
   let sessionReviewSnapshot: Record<string, any>
   let sessionControlSnapshot: Record<string, any>
   let validationLabSnapshot: Record<string, any>
+  let validationRunShouldFail: boolean
   let workspaceSnapshot: Record<string, any>
 
   beforeEach(() => {
+    validationRunShouldFail = false
     aiControlSnapshot = {
       summary: {
         overall_status: 'degraded',
@@ -917,6 +919,9 @@ describe('App', () => {
         }
 
         if (url.endsWith('/validation-lab/runs') && method === 'POST') {
+          if (validationRunShouldFail) {
+            return Promise.resolve(new Response('Validation replay unavailable', { status: 503 }))
+          }
           validationLabSnapshot.summary = {
             replay_ready: true,
             activation_review_status: 'ready',
@@ -1332,6 +1337,15 @@ describe('App', () => {
     window.history.replaceState(null, '', '/')
   })
 
+  function markAlphaNextStep(stepId: string, nextAction: string) {
+    alphaReadinessSnapshot.summary.next_action = nextAction
+    alphaReadinessSnapshot.operator_steps = alphaReadinessSnapshot.operator_steps.map((step: Record<string, any>) => ({
+      ...step,
+      is_next: step.step_id === stepId,
+      status: step.step_id === stepId ? 'warn' : step.status,
+    }))
+  }
+
   it('renders the runtime foundation shell with live overview data', async () => {
     render(<App />)
 
@@ -1389,6 +1403,53 @@ describe('App', () => {
     expect(await screen.findByText(/recheck reliability completed/i)).toBeInTheDocument()
     expect(await screen.findByText(/path complete/i)).toBeInTheDocument()
     expect(await screen.findByText(/alpha operator path is ready/i)).toBeInTheDocument()
+  })
+
+  it('keeps alpha operator state visible when a demo result is missing', async () => {
+    demoTradingSnapshot.records = demoTradingSnapshot.records.map((record: Record<string, any>) => ({
+      ...record,
+      broker_status: 'closed',
+      outcome_status: 'matched',
+      awaiting_result: false,
+    }))
+    markAlphaNextStep('resolve_demo_result', 'Resolve the current demo result before review.')
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /alpha operator/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /run alpha step resolve demo result/i }))
+
+    expect(await screen.findByText(/no awaiting demo result is available/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run alpha step resolve demo result/i })).toBeInTheDocument()
+    expect(screen.queryByText(/resolve demo result completed/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps alpha operator state visible when review feedback has no target record', async () => {
+    sessionReviewSnapshot.records = []
+    markAlphaNextStep('review_feedback', 'Capture review feedback before validation replay.')
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /alpha operator/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /run alpha step capture review feedback/i }))
+
+    expect(await screen.findByText(/no reviewable demo record is available/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run alpha step capture review feedback/i })).toBeInTheDocument()
+    expect(screen.queryByText(/capture review feedback completed/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps alpha operator state visible when validation replay fails', async () => {
+    validationRunShouldFail = true
+    markAlphaNextStep('run_validation_replay', 'Run validation replay before reliability recheck.')
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /alpha operator/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /run alpha step run validation replay/i }))
+
+    expect(await screen.findByText(/request failed for \/validation-lab\/runs: 503/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /run alpha step run validation replay/i })).toBeInTheDocument()
+    expect(screen.queryByText(/run validation replay completed/i)).not.toBeInTheDocument()
   })
 
   it('renders ai control and applies a reviewed assignment', async () => {
