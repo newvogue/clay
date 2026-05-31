@@ -15,11 +15,13 @@ import {
   Zap,
   Activity,
   Radar,
+  ShieldCheck,
 } from 'lucide-react'
 import { motion } from 'motion/react'
 
 export type AppScreen =
   | 'overview'
+  | 'alpha-operator'
   | 'workspace'
   | 'session-control'
   | 'control-center'
@@ -62,6 +64,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'alpha-operator', label: 'Alpha Operator', icon: ShieldCheck },
   { id: 'workspace', label: 'Trading Workspace', icon: BarChart3 },
   { id: 'session-control', label: 'Session Control', icon: Zap },
   { id: 'control-center', label: 'Control Center', icon: Radio },

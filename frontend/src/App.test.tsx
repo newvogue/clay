@@ -198,12 +198,48 @@ describe('App', () => {
           is_next: true,
         },
         {
+          step_id: 'log_demo_decision',
+          label: 'Log demo decision',
+          status: 'warn',
+          detail: 'Demo decision logging is waiting on an active session.',
+          target_screen: 'demo-validation',
+          action_label: 'Log demo decision',
+          is_next: false,
+        },
+        {
+          step_id: 'resolve_demo_result',
+          label: 'Resolve demo result',
+          status: 'warn',
+          detail: '0 demo records are resolved.',
+          target_screen: 'demo-validation',
+          action_label: 'Resolve demo result',
+          is_next: false,
+        },
+        {
+          step_id: 'review_feedback',
+          label: 'Review feedback',
+          status: 'warn',
+          detail: '0 review feedback items are captured.',
+          target_screen: 'session-review',
+          action_label: 'Capture review feedback',
+          is_next: false,
+        },
+        {
           step_id: 'run_validation_replay',
           label: 'Run validation replay',
           status: 'warn',
           detail: 'Validation Lab is waiting for the first replay run before any activation review.',
           target_screen: 'validation-lab',
           action_label: 'Run validation replay',
+          is_next: false,
+        },
+        {
+          step_id: 'recheck_reliability',
+          label: 'Recheck reliability',
+          status: 'warn',
+          detail: 'Reliability recheck is waiting.',
+          target_screen: 'reliability',
+          action_label: 'Recheck reliability',
           is_next: false,
         },
       ],
@@ -992,6 +1028,28 @@ describe('App', () => {
             can_resume: false,
             can_complete: true,
           }
+          alphaReadinessSnapshot.evidence.session_lifecycle_state = 'active_session'
+          alphaReadinessSnapshot.summary.next_action =
+            'Demo decision logging is available; log the current operator decision.'
+          alphaReadinessSnapshot.operator_steps = alphaReadinessSnapshot.operator_steps.map((step: Record<string, any>) => {
+            if (step.step_id === 'start_or_resume_session') {
+              return {
+                ...step,
+                status: 'pass',
+                detail: 'Lifecycle is active_session.',
+                is_next: false,
+              }
+            }
+            if (step.step_id === 'log_demo_decision') {
+              return {
+                ...step,
+                status: 'warn',
+                detail: 'Demo decision logging is available; log the current operator decision.',
+                is_next: true,
+              }
+            }
+            return { ...step, is_next: false }
+          })
           return Promise.resolve(new Response(JSON.stringify(sessionControlSnapshot), { status: 200 }))
         }
 
@@ -1192,6 +1250,18 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: /trading workspace/i })).toBeInTheDocument()
   })
 
+  it('runs the alpha operator console next step', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /alpha operator/i }))
+    expect(await screen.findByRole('heading', { name: /alpha operator console/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /run alpha step start session/i })).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: /run alpha step start session/i }))
+    expect(await screen.findByText(/start session completed/i)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /run alpha step log demo decision/i })).toBeInTheDocument()
+  })
+
   it('renders ai control and applies a reviewed assignment', async () => {
     render(<App />)
 
@@ -1243,7 +1313,7 @@ describe('App', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: /mark win/i }))[0])
     expect(await screen.findAllByText(/matched/i)).not.toHaveLength(0)
-    expect(await screen.findByText(/cumulative pnl: \+2.4%/i)).toBeInTheDocument()
+    expect(await screen.findAllByText(/cumulative pnl:\s*\+?2.4%/i)).not.toHaveLength(0)
   })
 
   it('renders session review, filters by pair, and captures feedback', async () => {

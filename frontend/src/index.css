@@ -377,6 +377,188 @@
     @apply mt-1 block text-[8px] font-bold not-italic uppercase tracking-[0.16em] text-clay-accent;
   }
 
+  .alpha-operator-page {
+    @apply auto-rows-min;
+  }
+
+  .alpha-operator-command-header {
+    @apply bg-transparent;
+  }
+
+  .alpha-operator-command-row,
+  .alpha-operator-next-actions {
+    @apply flex flex-wrap items-center justify-end gap-2;
+  }
+
+  .alpha-operator-command-row button,
+  .alpha-operator-next-actions button {
+    @apply inline-flex items-center gap-2 uppercase tracking-[0.16em];
+  }
+
+  .alpha-operator-error,
+  .alpha-operator-success {
+    @apply rounded border px-3 py-2 text-xs font-bold;
+  }
+
+  .alpha-operator-error {
+    @apply border-clay-danger/40 bg-clay-danger/10 text-clay-danger;
+  }
+
+  .alpha-operator-success {
+    @apply border-clay-success/35 bg-clay-success/10 text-clay-success;
+  }
+
+  .alpha-operator-next-panel {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-clay-accent/25 bg-clay-accent/5;
+  }
+
+  .alpha-operator-next-copy span,
+  .alpha-console-metric span,
+  .alpha-evidence-cell span,
+  .alpha-runbook-copy span,
+  .alpha-gate-meta span {
+    @apply text-[8px] font-bold uppercase tracking-[0.18em] text-clay-muted;
+  }
+
+  .alpha-operator-next-copy strong {
+    @apply mt-1 block text-lg font-bold text-clay-text;
+  }
+
+  .alpha-operator-next-copy p {
+    @apply mt-1 max-w-4xl text-[11px] font-medium text-clay-text-muted;
+  }
+
+  .alpha-operator-summary-strip {
+    @apply grid grid-cols-2 gap-3 md:grid-cols-5;
+  }
+
+  .alpha-console-metric {
+    @apply min-h-20 rounded-md border border-clay-border bg-clay-card p-3;
+  }
+
+  .alpha-console-metric strong {
+    @apply mt-2 block text-sm font-bold uppercase text-clay-text;
+  }
+
+  .alpha-console-metric[data-tone='pass'] {
+    @apply border-clay-success/30 bg-clay-success/5;
+  }
+
+  .alpha-console-metric[data-tone='pass'] strong {
+    @apply text-clay-success;
+  }
+
+  .alpha-console-metric[data-tone='warn'] {
+    @apply border-clay-warning/30 bg-clay-warning/5;
+  }
+
+  .alpha-console-metric[data-tone='warn'] strong {
+    @apply text-clay-warning;
+  }
+
+  .alpha-console-metric[data-tone='fail'] {
+    @apply border-clay-danger/35 bg-clay-danger/5;
+  }
+
+  .alpha-console-metric[data-tone='fail'] strong {
+    @apply text-clay-danger;
+  }
+
+  .alpha-operator-grid {
+    @apply grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(24rem,0.85fr)];
+  }
+
+  .alpha-operator-panel {
+    @apply min-w-0;
+  }
+
+  .alpha-operator-panel-title {
+    @apply mb-4 flex items-start justify-between gap-3 border-b border-clay-border/50 pb-3;
+  }
+
+  .alpha-operator-panel-title h3 {
+    @apply mb-0;
+  }
+
+  .alpha-operator-panel-title span {
+    @apply mt-1 block text-[9px] font-bold uppercase tracking-[0.16em] text-clay-muted;
+  }
+
+  .alpha-operator-empty {
+    @apply rounded border border-dashed border-clay-border bg-clay-bg/35 px-3 py-6 text-center text-[10px] font-bold uppercase tracking-[0.14em] text-clay-muted;
+  }
+
+  .alpha-runbook-list {
+    @apply space-y-2;
+  }
+
+  .alpha-runbook-step {
+    @apply grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 rounded border border-clay-border/60 bg-clay-bg/35 px-3 py-3;
+  }
+
+  .alpha-runbook-step[data-next='true'] {
+    @apply border-clay-accent/60 bg-clay-accent/10 shadow-[inset_3px_0_0_var(--clay-accent)];
+  }
+
+  .alpha-runbook-step[data-tone='pass'] {
+    @apply border-clay-success/25;
+  }
+
+  .alpha-runbook-step[data-tone='fail'] {
+    @apply border-clay-danger/35;
+  }
+
+  .alpha-runbook-index {
+    @apply flex h-8 w-8 items-center justify-center rounded border border-clay-border bg-clay-card font-mono text-[10px] font-bold text-clay-muted;
+  }
+
+  .alpha-runbook-copy strong,
+  .alpha-gate-card strong,
+  .alpha-evidence-cell strong {
+    @apply block text-xs font-bold text-clay-text;
+  }
+
+  .alpha-runbook-copy p,
+  .alpha-gate-card p {
+    @apply mt-1 text-[10px] font-medium leading-4 text-clay-text-muted;
+  }
+
+  .alpha-evidence-grid {
+    @apply grid grid-cols-1 gap-2 sm:grid-cols-2;
+  }
+
+  .alpha-evidence-cell {
+    @apply rounded border border-clay-border/55 bg-clay-bg/35 px-3 py-2;
+  }
+
+  .alpha-evidence-cell strong {
+    @apply mt-1 uppercase;
+  }
+
+  .alpha-gate-grid {
+    @apply grid grid-cols-1 gap-3 xl:grid-cols-2;
+  }
+
+  .alpha-gate-card {
+    @apply grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded border border-clay-border/60 bg-clay-bg/35 px-3 py-3;
+  }
+
+  .alpha-gate-card[data-tone='pass'] {
+    @apply border-clay-success/25;
+  }
+
+  .alpha-gate-card[data-tone='warn'] {
+    @apply border-clay-warning/30;
+  }
+
+  .alpha-gate-card[data-tone='fail'] {
+    @apply border-clay-danger/35;
+  }
+
+  .alpha-gate-meta {
+    @apply flex min-w-24 flex-col items-end justify-center gap-2;
+  }
+
   .dense-list {
     @apply space-y-2.5;
   }

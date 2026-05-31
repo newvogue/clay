@@ -5,6 +5,7 @@ import { getControlCenterOverview, getControlCenterStreamUrl } from './api/clien
 import { AppSidebar, type AppScreen, type ShellSessionState } from './components/app-sidebar'
 import { AppTopbar } from './components/app-topbar'
 import { AIControlPage } from './features/ai-control/ai-control-page'
+import { AlphaOperatorPage } from './features/alpha/alpha-operator-page'
 import { ControlCenterPage } from './features/control-center/control-center-page'
 import { DemoValidationPage } from './features/demo-trading/demo-validation-page'
 import { KnowledgePage } from './features/knowledge/knowledge-page'
@@ -19,6 +20,7 @@ import type { ControlCenterSnapshot } from './types/control-center'
 
 const appScreens: AppScreen[] = [
   'overview',
+  'alpha-operator',
   'workspace',
   'session-control',
   'control-center',
@@ -167,6 +169,8 @@ export function App() {
     switch (screen) {
       case 'overview':
         return <OverviewPage onNavigate={setScreen} />
+      case 'alpha-operator':
+        return <AlphaOperatorPage onNavigate={setScreen} />
       case 'workspace':
         return <TradingWorkspacePage />
       case 'session-control':

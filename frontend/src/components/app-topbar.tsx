@@ -26,6 +26,7 @@ type AppTopbarProps = {
 
 const screenLabels: Record<AppScreen, string> = {
   overview: 'Overview',
+  'alpha-operator': 'Alpha Operator',
   workspace: 'Trading Workspace',
   'session-control': 'Session Control',
   'control-center': 'Control Center',
