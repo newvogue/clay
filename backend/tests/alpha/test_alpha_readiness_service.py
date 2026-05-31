@@ -2,8 +2,20 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
+
 from clay.ai_control.service import AIControlService
 from clay.alpha.service import AlphaReadinessService
+from clay.api.dependencies import (
+    get_alpha_readiness_service,
+    get_db_session,
+    get_demo_trading_service,
+    get_reliability_service,
+    get_session_control_service,
+    get_session_review_service,
+    get_validation_lab_service,
+)
+from clay.api.main import create_app
 from clay.api.routes.alpha import get_alpha_overview
 from clay.api.routes.demo_trading import ingest_demo_result, log_current_demo_trade
 from clay.api.routes.reliability import recheck_reliability
@@ -402,8 +414,112 @@ def test_alpha_happy_path_advances_runbook_across_operator_routes(db_session, tm
 
     final = asyncio.run(get_alpha_overview(db_session, bundle["service"]))
     assert final["summary"]["operator_path_ready"] is True
+    assert final["summary"]["readiness_status"] == "operator_path_ready"
+    assert final["evidence"]["release_readiness_status"] == "needs_attention"
     assert next_operator_step(final) is None
     assert all(step["status"] == "pass" for step in final["operator_steps"])
+
+
+def test_alpha_operator_path_runs_through_http_api_contracts(db_session, tmp_path: Path) -> None:
+    bundle = build_alpha_bundle(tmp_path)
+    seed_alpha_inputs(db_session)
+    app = create_app()
+
+    async def override_db_session():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = override_db_session
+    app.dependency_overrides[get_alpha_readiness_service] = lambda: bundle["service"]
+    app.dependency_overrides[get_session_control_service] = lambda: bundle["session_control_service"]
+    app.dependency_overrides[get_demo_trading_service] = lambda: bundle["demo_trading_service"]
+    app.dependency_overrides[get_session_review_service] = lambda: bundle["session_review_service"]
+    app.dependency_overrides[get_validation_lab_service] = lambda: bundle["validation_lab_service"]
+    app.dependency_overrides[get_reliability_service] = lambda: bundle["reliability_service"]
+
+    async def run_path() -> None:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            initial = (await client.get("/alpha/overview")).json()
+            assert_next_step(initial, "start_or_resume_session", "session-control")
+
+            started = await client.post("/session/start")
+            assert started.status_code == 200
+            assert started.json()["lifecycle"]["lifecycle_state"] == "active_session"
+
+            after_start = (await client.get("/alpha/overview")).json()
+            assert_next_step(after_start, "log_demo_decision", "demo-validation")
+
+            logged = await client.post(
+                "/demo-trading/log-current",
+                json={
+                    "operator_action": "entered",
+                    "operator_notes": "Alpha HTTP acceptance operator entry.",
+                },
+            )
+            assert logged.status_code == 200
+            record_id = logged.json()["records"][0]["record_id"]
+
+            after_log = (await client.get("/alpha/overview")).json()
+            assert_next_step(after_log, "resolve_demo_result", "demo-validation")
+
+            resolved = await client.post(
+                "/demo-trading/results/ingest",
+                json={
+                    "record_id": record_id,
+                    "external_trade_id": "alpha-http-1",
+                    "broker_status": "closed",
+                    "entry_price": 100.0,
+                    "exit_price": 101.4,
+                    "pnl_pct": 1.4,
+                },
+            )
+            assert resolved.status_code == 200
+            assert resolved.json()["records"][0]["outcome_status"] == "matched"
+
+            after_result = (await client.get("/alpha/overview")).json()
+            assert_next_step(after_result, "review_feedback", "session-review")
+
+            reviewed = await client.post(
+                "/session-review/feedback",
+                json={
+                    "record_id": record_id,
+                    "feedback_label": "useful",
+                    "notes": "Alpha HTTP acceptance feedback checkpoint.",
+                },
+            )
+            assert reviewed.status_code == 200
+            assert reviewed.json()["summary"]["feedback_count"] == 1
+
+            after_feedback = (await client.get("/alpha/overview")).json()
+            assert_next_step(after_feedback, "run_validation_replay", "validation-lab")
+
+            validation = await client.post(
+                "/validation-lab/runs",
+                json={
+                    "run_type": "strategy_replay",
+                    "label": "Alpha HTTP acceptance replay",
+                },
+            )
+            assert validation.status_code == 200
+            assert validation.json()["summary"]["replay_ready"] is True
+
+            after_validation = (await client.get("/alpha/overview")).json()
+            assert_next_step(after_validation, "recheck_reliability", "reliability")
+
+            reliability = await client.post("/reliability/recheck")
+            assert reliability.status_code == 200
+            assert reliability.json()["summary"]["last_rechecked_at"] is not None
+
+            final = (await client.get("/alpha/overview")).json()
+            assert final["summary"]["operator_path_ready"] is True
+            assert final["summary"]["readiness_status"] == "operator_path_ready"
+            assert next_operator_step(final) is None
+            assert all(step["status"] == "pass" for step in final["operator_steps"])
+
+    try:
+        asyncio.run(run_path())
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_alpha_overview_route_returns_snapshot_payload(db_session, tmp_path: Path) -> None:

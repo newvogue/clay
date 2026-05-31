@@ -68,7 +68,7 @@ class AlphaReadinessService:
         )
 
         return AlphaReadinessSnapshot(
-            summary=self._build_summary(gates),
+            summary=self._build_summary(gates, operator_steps),
             gates=gates,
             operator_steps=operator_steps,
             evidence=AlphaReadinessEvidence(
@@ -116,7 +116,7 @@ class AlphaReadinessService:
         reliability_status: AlphaGateStatus = "pass"
         if reliability_snapshot.summary.release_readiness_status == "blocked":
             reliability_status = "fail"
-        elif reliability_snapshot.summary.release_readiness_status == "needs_attention":
+        elif reliability_snapshot.summary.last_rechecked_at is None:
             reliability_status = "warn"
 
         return [
@@ -327,13 +327,21 @@ class AlphaReadinessService:
             for step in steps
         ]
 
-    def _build_summary(self, gates: list[AlphaReadinessGateSnapshot]) -> AlphaReadinessSummary:
+    def _build_summary(
+        self,
+        gates: list[AlphaReadinessGateSnapshot],
+        operator_steps: list[AlphaOperatorStepSnapshot],
+    ) -> AlphaReadinessSummary:
         blocking_gates = [gate for gate in gates if gate.status == "fail" and gate.blocks_alpha]
         warning_gates = [gate for gate in gates if gate.status == "warn"]
+        next_step = next((step for step in operator_steps if step.is_next), None)
         operator_path_ready = not blocking_gates
         if blocking_gates:
             readiness_status = "blocked"
             next_action = blocking_gates[0].detail
+        elif next_step is None:
+            readiness_status = "operator_path_ready"
+            next_action = "Alpha operator path is ready for a disciplined end-to-end run."
         elif warning_gates:
             readiness_status = "needs_attention"
             next_action = warning_gates[0].detail
