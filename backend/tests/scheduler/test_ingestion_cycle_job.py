@@ -246,12 +246,16 @@ def _make_job(
 
 @pytest.mark.anyio
 async def test_run_calls_run_once_emit_false_and_commits(tmp_path: Path) -> None:
-    """``run()`` calls ``run_once(session, emit=False)`` and commits the session.
+    """``run()`` calls ``run_once(session, emit=False)`` and the commit
+    happens inside ``_do_run_once`` (B6 cleanup).
 
     The job owns the session lifecycle: opens a session from
-    ``session_factory``, calls the service with ``emit=False`` (the
-    scheduler-driven path), and commits the session before computing
-    the diff.
+    ``session_factory`` and calls the service with ``emit=False`` (the
+    scheduler-driven path). The actual commit happens inside
+    ``IngestionCycleService._do_run_once`` under the service's
+    ``asyncio.Lock`` (``ingestion/service.py:177``) — the prior
+    explicit ``session.commit()`` here was a harmless no-op and is
+    removed (B6 cleanup).
     """
     job, service, _, _, factory = _make_job(tmp_path)
 
@@ -261,7 +265,6 @@ async def test_run_calls_run_once_emit_false_and_commits(tmp_path: Path) -> None
     session_arg, emit_arg = service.run_once_calls[0]
     assert emit_arg is False
     assert session_arg in factory.sessions
-    assert factory.sessions[0].committed is True
 
 
 @pytest.mark.anyio

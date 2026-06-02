@@ -400,7 +400,12 @@ class IngestionCycleJob:
                     "clay.scheduler: ingestion cycle started mid-tick, skip",
                 )
                 return
-            session.commit()
+        # B6 cleanup: the prior ``session.commit()`` here was a
+        # harmless no-op — ``IngestionCycleService._do_run_once``
+        # already commits under its own ``asyncio.Lock``
+        # (ingestion/service.py:177). The outer session is left
+        # open until the ``with`` block exits; no explicit commit
+        # is needed here.
         # B4 #11: a successful tick closes the failing episode so a
         # later failure re-emits ``ingestion.cycle_failed``.
         self._failing = False
