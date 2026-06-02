@@ -4,10 +4,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from clay.ai_control.service import AIControlService
 from clay.audit.writer import AuditWriter
+from clay.db.repositories_runtime_state import StrategyStateRepository
 from clay.db.repositories_validation import ValidationRepository
 from clay.events.bus import EventBus
 from clay.session_review.service import SessionReviewService
@@ -31,13 +32,25 @@ class ValidationLabService:
         session_review_service: SessionReviewService,
         audit_writer: AuditWriter,
         event_bus: EventBus,
+        session_factory: sessionmaker | None = None,
     ) -> None:
         self.signal_engine_service = signal_engine_service
         self.ai_control_service = ai_control_service
         self.session_review_service = session_review_service
         self.audit_writer = audit_writer
         self.event_bus = event_bus
-        self._strategy_mode = "momentum"
+        self.session_factory = session_factory
+        # ``_strategy_mode`` is restored from the ``ops.strategy_state``
+        # singleton row when a ``session_factory`` is supplied. Without
+        # one (legacy callers and pre-A5 tests), the service falls back
+        # to the in-memory default ``"momentum"`` and stays non-persistent.
+        if session_factory is None:
+            self._strategy_mode = "momentum"
+        else:
+            with session_factory() as session:
+                state = StrategyStateRepository(session).get_or_create()
+                self._strategy_mode = state.strategy_mode
+                session.commit()
 
     def build_snapshot(self, session: Session) -> ValidationLabSnapshot:
         repository = ValidationRepository(session)
@@ -211,8 +224,25 @@ class ValidationLabService:
 
         if row.target_type == "strategy_mode":
             self._strategy_mode = row.proposed_value
+            # write-through: persist the new mode immediately so a restart
+            # between apply and the next build_snapshot still sees it.
+            if self.session_factory is not None:
+                StrategyStateRepository(session).save(strategy_mode=self._strategy_mode)
         elif row.target_type == "model_assignment":
-            self.ai_control_service.assignments[row.target_id] = row.proposed_value
+            # A5.5 (D2 fix): route through ``ai_control.set_assignment``
+            # — the trusted internal-caller path that mirrors
+            # ``apply_assignment`` write-through (DB upsert + audit +
+            # ``ai.updated`` event) but does NOT require a pending review,
+            # does NOT touch ``ai_control_state.last_reviewed_at`` or
+            # ``pending_review_*``, and does NOT re-evaluate preflight
+            # ``blocks_apply``. Validation_lab owns its own posture gate
+            # (``row.status == "blocked"`` was rejected above) and its own
+            # ``review_id`` trail in ``validation.activation_reviews``.
+            self.ai_control_service.set_assignment(
+                role_id=row.target_id,
+                model_id=row.proposed_value,
+                session=session,
+            )
         else:
             raise ValueError("unsupported activation target")
 

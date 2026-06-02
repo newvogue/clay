@@ -51,6 +51,7 @@ def test_ai_control_review_and_apply_flow(db_session) -> None:
                 role_id="forecast-model",
                 model_id="forecast-lite-v1",
             ),
+            session=db_session,
             service=service,
         )
     )

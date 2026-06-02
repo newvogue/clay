@@ -1,5 +1,11 @@
+import json
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
 
 from clay.ai_control.service import AIControlService
 from clay.audit.writer import AuditWriter
@@ -257,3 +263,145 @@ def test_reliability_snapshot_reports_needs_attention_with_good_demo_evidence(db
     assert snapshot.summary.blocking_gate_count == 0
     assert any(gate.gate_id == "demo-discipline" and gate.status == "pass" for gate in snapshot.release_gates)
     assert any(gate.gate_id == "local-fallback" and gate.status == "warn" for gate in snapshot.release_gates)
+
+
+# === B4 — ReliabilityService.recheck() emit-flag refactor ===
+#
+# The B4 scheduler-driven recheck path (``ReliabilityRecheckJob``) calls
+# ``recheck(session, emit=False)`` and applies its own transition-only
+# audit/bus policy. The manual ``POST /reliability/recheck`` route keeps
+# the default ``emit=True`` (backward-compat with the A6 audit
+# contract). The two tests below pin both contracts.
+
+
+def _read_audit_events(audit_writer: AuditWriter) -> list[dict[str, Any]]:
+    """Read the JSONL audit log. Returns ``[]`` if the file does not exist.
+
+    AuditWriter is lazy: ``write()`` creates the file on first call.
+    A test that asserts "no audit was written" must tolerate the
+    absent file (rather than crashing on ``open()``), so this helper
+    short-circuits to ``[]`` when the path is missing.
+    """
+    if not audit_writer.path.exists():
+        return []
+    with audit_writer.path.open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def _drain_event_bus(event_bus: EventBus) -> list[tuple[str, dict[str, Any]]]:
+    """Drain every subscribed queue (test helper, mirrors scheduler tests)."""
+    drained: list[tuple[str, dict[str, Any]]] = []
+    for queue in list(event_bus._subscribers):  # noqa: SLF001 (test helper)
+        while True:
+            try:
+                message = queue.get_nowait()
+            except Exception:  # asyncio.QueueEmpty
+                break
+            drained.append((message.event_type, message.payload))
+    return drained
+
+
+def _build_fake_reliability_service(
+    tmp_path: Path,
+    *,
+    session_factory: Any = None,
+) -> tuple[ReliabilityService, AuditWriter, EventBus]:
+    """Build a ``ReliabilityService`` with stubbed sub-services.
+
+    Only the side-effect surface of ``recheck`` (audit_writer, event_bus,
+    session_factory) is exercised here — the snapshot build pipeline is
+    covered by the existing ``build_snapshot`` tests above, so the
+    sub-services are stubbed with ``MagicMock`` and ``build_snapshot``
+    is replaced with a fake.
+
+    ``session_factory`` defaults to ``None`` so ``__init__`` falls
+    into the no-restore branch (``_last_rechecked_at = None``). Tests
+    that need ``recheck`` to persist ``last_rechecked_at`` assign
+    ``service.session_factory`` post-construction (avoiding the
+    no-op MagicMock init-restore that would otherwise clobber the
+    in-memory timestamp with a MagicMock attribute).
+    """
+    audit_writer = AuditWriter(tmp_path / "state")
+    event_bus = EventBus()
+    event_bus.subscribe()  # so _drain_event_bus sees published events
+    stub = MagicMock()
+    service = ReliabilityService(
+        control_center_service=stub,
+        ai_control_service=stub,
+        demo_trading_service=stub,
+        session_review_service=stub,
+        validation_lab_service=stub,
+        audit_writer=audit_writer,
+        event_bus=event_bus,
+        session_factory=session_factory,
+    )
+    fake_snap = MagicMock()
+    fake_snap.summary.release_readiness_status = "ready_for_demo"
+    fake_snap.summary.blocking_gate_count = 0
+    fake_snap.summary.warning_gate_count = 2
+    service.build_snapshot = MagicMock(return_value=fake_snap)  # type: ignore[method-assign]
+    return service, audit_writer, event_bus
+
+
+def test_recheck_default_emits_audit_and_bus(tmp_path: Path) -> None:
+    """Backward-compat: ``recheck()`` with default ``emit=True`` writes audit + bus.
+
+    Manual ``POST /reliability/recheck`` route (and any other caller
+    that does not pass ``emit=``) keeps the A6 contract: one
+    ``reliability.rechecked`` audit and one ``reliability.updated``
+    bus event per call.
+    """
+    service, audit_writer, event_bus = _build_fake_reliability_service(tmp_path)
+    session = MagicMock()
+
+    service.recheck(session)  # default emit=True
+
+    events = _read_audit_events(audit_writer)
+    assert any(e["event_type"] == "reliability.rechecked" for e in events)
+    drained = _drain_event_bus(event_bus)
+    assert any(topic == "reliability.updated" for topic, _ in drained)
+
+
+def test_recheck_emit_false_skips_audit_and_bus_but_persists_last_rechecked_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``emit=False`` → no audit, no bus, but ``last_rechecked_at`` updated (in-memory + DB).
+
+    B4 scheduler-driven path: ``ReliabilityRecheckJob`` calls
+    ``recheck(session, emit=False)`` and applies its own
+    transition-only audit/bus policy. The DB write of
+    ``last_rechecked_at`` must still happen so the post-restart
+    timestamp stays current (A5 persistence contract —
+    ``last_rechecked_at`` is the timestamp the operator trusts for
+    "how fresh is the latest recheck").
+    """
+    from clay.db.repositories_runtime_state import ReliabilityStateRepository
+
+    save_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        ReliabilityStateRepository,
+        "save",
+        lambda self, **kwargs: save_calls.append(kwargs),
+    )
+
+    # Build with session_factory=None so ``__init__`` does not try to
+    # restore ``_last_rechecked_at`` from a MagicMock session (which
+    # would clobber the ``None`` initial state with a MagicMock
+    # attribute and break the assertion below). Assign the fake
+    # session_factory post-construction so ``recheck`` still calls
+    # ``ReliabilityStateRepository.save``.
+    service, audit_writer, event_bus = _build_fake_reliability_service(tmp_path)
+    service.session_factory = MagicMock()
+    session = MagicMock()
+    assert service._last_rechecked_at is None  # __init__ default
+
+    service.recheck(session, emit=False)
+
+    # No audit, no bus — emit path is fully suppressed.
+    assert _read_audit_events(audit_writer) == []
+    assert _drain_event_bus(event_bus) == []
+    # _last_rechecked_at updated in-memory.
+    assert service._last_rechecked_at is not None
+    # ``ReliabilityStateRepository.save`` invoked with last_rechecked_at=.
+    assert len(save_calls) == 1
+    assert "last_rechecked_at" in save_calls[0]

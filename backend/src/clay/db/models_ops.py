@@ -1,9 +1,10 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import CheckConstraint, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from clay.db.base import Base
+from clay.db.types import UTCDateTime
 
 
 class IngestRun(Base):
@@ -43,3 +44,98 @@ class SourceHealthEvent(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# === Wave A / Slice A1: ops runtime state persistence (2026-06-01) ===
+# See alembic revision 0008_ops_runtime_state. Tables here mirror the in-memory
+# state that lives in: ai_control, session_control, workspace, validation_lab,
+# reliability. Five of these tables are singletons (CHECK id = 1).
+#
+# Slice A2.5 (2026-06-01): the datetime columns on the 6 new tables below
+# are typed as ``UTCDateTime`` (see ``clay.db.types``) so that round-trips
+# against SQLite preserve a UTC ``tzinfo`` (PostgreSQL would already do
+# this; SQLite returns naive ``datetime`` otherwise). The 3 legacy
+# ``ops``-schema tables above intentionally keep raw
+# ``DateTime(timezone=True)`` to avoid a behavioural change for code and
+# tests that depend on them.
+
+
+class AIAssignment(Base):
+    __tablename__ = "ai_assignments"
+    __table_args__ = {"schema": "ops"}
+
+    role_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model_id: Mapped[str] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class AIControlState(Base):
+    __tablename__ = "ai_control_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_ops_ai_control_state_singleton"),
+        {"schema": "ops"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    pending_review_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_review_role_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_review_model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_review_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class SessionState(Base):
+    __tablename__ = "session_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_ops_session_state_singleton"),
+        {"schema": "ops"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    current_pair_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    current_signal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    strategy_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    pending_replacement_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_current_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pending_proposed_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pending_created_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
+class WorkspaceFocus(Base):
+    __tablename__ = "workspace_focus"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_ops_workspace_focus_singleton"),
+        {"schema": "ops"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    focus_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    focus_source: Mapped[str] = mapped_column(String(32))
+    selected_signal_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class StrategyState(Base):
+    __tablename__ = "strategy_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_ops_strategy_state_singleton"),
+        {"schema": "ops"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_mode: Mapped[str] = mapped_column(String(32))
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+
+class ReliabilityState(Base):
+    __tablename__ = "reliability_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_ops_reliability_state_singleton"),
+        {"schema": "ops"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    last_rechecked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

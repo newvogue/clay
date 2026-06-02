@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from clay.ai_control.service import AIControlService
 from clay.audit.writer import AuditWriter
+from clay.db.repositories_runtime_state import SessionStateRepository
 from clay.events.bus import EventBus
 from clay.runtime.manager import RuntimeManager
 from clay.runtime.states import RuntimeState
@@ -52,6 +53,7 @@ class SessionControlService:
         workspace_service: WorkspaceService,
         audit_writer: AuditWriter,
         event_bus: EventBus,
+        session_factory: sessionmaker | None = None,
     ) -> None:
         self.runtime_manager = runtime_manager
         self.signal_engine_service = signal_engine_service
@@ -59,8 +61,158 @@ class SessionControlService:
         self.workspace_service = workspace_service
         self.audit_writer = audit_writer
         self.event_bus = event_bus
-        self._active_session: ActiveSessionRecord | None = None
-        self._pending_replacement: PendingReplacementReview | None = None
+        self.session_factory = session_factory
+        # ``_active_session`` and ``_pending_replacement`` are restored from the
+        # ``ops.session_state`` singleton row when a ``session_factory`` is
+        # supplied. Without one (legacy callers and pre-A4 tests), the service
+        # falls back to the in-memory defaults and stays non-persistent.
+        if session_factory is None:
+            self._active_session: ActiveSessionRecord | None = None
+            self._pending_replacement: PendingReplacementReview | None = None
+        else:
+            with session_factory() as session:
+                self._restore_from_db(session)
+                session.commit()
+
+    def _restore_from_db(self, session: Session) -> None:
+        """Hydrate ``_active_session`` and ``_pending_replacement`` from the
+        ``session_state`` singleton row.
+
+        Discriminator for active session: ``session_id``. If ``None``, there
+        is no active session. If set, the other required fields
+        (``started_at``, ``strategy_mode``, ``current_pair_symbol``) must be
+        populated too — otherwise the row is inconsistent (corrupted by
+        manual psql or a future bug) and we fail-fast with ``ValueError``.
+        ``current_signal_id`` and ``paused_at`` are legitimately nullable.
+
+        Discriminator for pending replacement: ``pending_replacement_id``.
+        Same rules for the other pending_* fields.
+        """
+        state = SessionStateRepository(session).get_or_create()
+
+        if state.session_id is None:
+            self._active_session: ActiveSessionRecord | None = None
+        else:
+            if state.started_at is None:
+                raise ValueError(
+                    "session_state row inconsistent: session_id set but started_at is NULL"
+                )
+            if state.strategy_mode is None:
+                raise ValueError(
+                    "session_state row inconsistent: session_id set but strategy_mode is NULL"
+                )
+            if state.current_pair_symbol is None:
+                raise ValueError(
+                    "session_state row inconsistent: session_id set but current_pair_symbol is NULL"
+                )
+            self._active_session = ActiveSessionRecord(
+                session_id=state.session_id,
+                current_pair_symbol=state.current_pair_symbol,
+                current_signal_id=state.current_signal_id,
+                strategy_mode=state.strategy_mode,
+                started_at=state.started_at,
+                paused_at=state.paused_at,
+            )
+
+        if state.pending_replacement_id is None:
+            self._pending_replacement: PendingReplacementReview | None = None
+        else:
+            if state.pending_current_symbol is None:
+                raise ValueError(
+                    "session_state row inconsistent: pending_replacement_id set but "
+                    "pending_current_symbol is NULL"
+                )
+            if state.pending_proposed_symbol is None:
+                raise ValueError(
+                    "session_state row inconsistent: pending_replacement_id set but "
+                    "pending_proposed_symbol is NULL"
+                )
+            if state.pending_created_at is None:
+                # Same fail-fast contract as the other pending_* fields: the
+                # discriminator ``pending_replacement_id`` is set, so all
+                # sibling fields must be populated too. A NULL here means a
+                # corrupted row (manual psql or a future bug) and silently
+                # substituting ``datetime.now(UTC)`` would lose the original
+                # pending-review timestamp. (A4 follow-up #2.)
+                raise ValueError(
+                    "session_state row inconsistent: pending_replacement_id set but "
+                    "pending_created_at is NULL"
+                )
+            self._pending_replacement = PendingReplacementReview(
+                review_id=state.pending_replacement_id,
+                current_symbol=state.pending_current_symbol,
+                proposed_symbol=state.pending_proposed_symbol,
+                created_at=state.pending_created_at,
+            )
+
+    def _persist_session_state(self, session: Session) -> None:
+        """Write a full snapshot of ``_active_session`` and
+        ``_pending_replacement`` to the ``session_state`` singleton row.
+
+        All 10 fields are written on every call (full snapshot, not partial
+        update) so the DB always mirrors the in-memory state. Singleton
+        table → 1 UPDATE per mutation. Idempotent: replaying the same
+        in-memory state produces the same row.
+        """
+        active = self._active_session
+        pending = self._pending_replacement
+        SessionStateRepository(session).save(
+            session_id=active.session_id if active else None,
+            current_pair_symbol=active.current_pair_symbol if active else None,
+            current_signal_id=active.current_signal_id if active else None,
+            strategy_mode=active.strategy_mode if active else None,
+            started_at=active.started_at if active else None,
+            paused_at=active.paused_at if active else None,
+            pending_replacement_id=pending.review_id if pending else None,
+            pending_current_symbol=pending.current_symbol if pending else None,
+            pending_proposed_symbol=pending.proposed_symbol if pending else None,
+            pending_created_at=pending.created_at if pending else None,
+        )
+
+    def reconcile_runtime_state(self) -> None:
+        """Reconcile ``runtime_manager`` with the restored ``_active_session``.
+
+        Closes A4 §6 Q2 (and the analogous issue raised in A6 recon):
+        after a restart, ``runtime_manager`` defaults to
+        ``BACKGROUND_MONITORING``. If ``_active_session`` was restored
+        from ``session_state`` on init, the
+        ``_build_lifecycle`` switch falls through to the final
+        ``else: lifecycle_state = "review"`` branch — a false-positive,
+        since the session was actually ``ACTIVE_SESSION`` or ``PAUSED``
+        before the crash. This method projects the restored session
+        back onto the FSM via ``RuntimeManager.reconcile_to`` (see
+        ``manager.py`` for the contract: boot-safety by design,
+        whitelist-guarded, no path/readiness validation).
+
+        Rule (input → output):
+
+        - ``_active_session is None`` (no session restored) →
+          no-op; ``runtime_manager`` stays at its default
+          ``BACKGROUND_MONITORING``.
+        - ``_active_session.paused_at is not None`` (was paused) →
+          ``reconcile_to(PAUSED)``.
+        - otherwise (``_active_session.paused_at is None``,
+          was active) → ``reconcile_to(ACTIVE_SESSION)``.
+
+        No-op if ``_active_session is None`` (nothing to reconcile).
+
+        The ``reconcile_to`` whitelist guarantees we never project
+        onto ``BACKGROUND_MONITORING`` / ``REVIEW`` / ``DEGRADED`` —
+        those are operator-action targets, not restore targets.
+
+        Called from ``bootstrap.build_services`` (and from the
+        integration-suite factory) **after** ``__init__`` finishes
+        restore, **before** any ``build_snapshot`` is called by
+        request handlers. Order is load-bearing: without it,
+        ``_build_lifecycle`` would return the false-positive
+        ``"review"`` for the first snapshot after a restart.
+        """
+        if self._active_session is None:
+            return
+        if self._active_session.paused_at is not None:
+            self.runtime_manager.reconcile_to(RuntimeState.PAUSED)
+        else:
+            self.runtime_manager.reconcile_to(RuntimeState.ACTIVE_SESSION)
 
     def build_snapshot(self, session: Session) -> SessionControlSnapshot:
         signal_snapshot = self.signal_engine_service.build_snapshot(session)
@@ -101,19 +253,28 @@ class SessionControlService:
             symbol=top_signal.symbol,
             focus_source="session_start",
             signal_id=top_signal.signal_id,
+            session=session,
         )
+        # Capture payload locals before mutating in-memory; the event is
+        # published last so a failed persist leaves no half-state behind.
+        new_session_id = str(uuid4())
+        new_started_at = datetime.now(UTC)
         self._active_session = ActiveSessionRecord(
-            session_id=str(uuid4()),
+            session_id=new_session_id,
             current_pair_symbol=top_signal.symbol,
             current_signal_id=top_signal.signal_id,
             strategy_mode=snapshot.briefing.active_strategy,
-            started_at=datetime.now(UTC),
+            started_at=new_started_at,
         )
         self._pending_replacement = None
+        # write-through: persist the new active session before publishing the
+        # event. If the DB write raises, in-memory state stays consistent
+        # with the previous commit and the caller can safely retry.
+        self._persist_session_state(session)
         self._write_and_publish(
             "session.started",
             {
-                "session_id": self._active_session.session_id,
+                "session_id": new_session_id,
                 "symbol": top_signal.symbol,
                 "signal_id": top_signal.signal_id,
             },
@@ -125,11 +286,15 @@ class SessionControlService:
             raise ValueError("no active session")
         if self.runtime_manager.snapshot().state != RuntimeState.ACTIVE_SESSION:
             raise ValueError("runtime is not in active_session")
+        # Capture payload before mutation.
+        event_session_id = self._active_session.session_id
         self.runtime_manager.transition_to(RuntimeState.PAUSED)
         self._active_session.paused_at = datetime.now(UTC)
+        # write-through: persist ``paused_at`` before publishing.
+        self._persist_session_state(session)
         self._write_and_publish(
             "session.paused",
-            {"session_id": self._active_session.session_id},
+            {"session_id": event_session_id},
         )
         return self.build_snapshot(session)
 
@@ -138,11 +303,15 @@ class SessionControlService:
             raise ValueError("no active session")
         if self.runtime_manager.snapshot().state != RuntimeState.PAUSED:
             raise ValueError("runtime is not paused")
+        # Capture payload before mutation.
+        event_session_id = self._active_session.session_id
         self.runtime_manager.transition_to(RuntimeState.ACTIVE_SESSION)
         self._active_session.paused_at = None
+        # write-through: persist ``paused_at=None`` before publishing.
+        self._persist_session_state(session)
         self._write_and_publish(
             "session.resumed",
-            {"session_id": self._active_session.session_id},
+            {"session_id": event_session_id},
         )
         return self.build_snapshot(session)
 
@@ -152,13 +321,19 @@ class SessionControlService:
         state = self.runtime_manager.snapshot().state
         if state not in {RuntimeState.ACTIVE_SESSION, RuntimeState.PAUSED}:
             raise ValueError("session is not active")
+        # Capture payload before clearing the active session record.
+        event_session_id = self._active_session.session_id
         self.runtime_manager.transition_to(RuntimeState.REVIEW)
-        self._write_and_publish(
-            "session.completed",
-            {"session_id": self._active_session.session_id},
-        )
+        # Clear in-memory, then write a full-snapshot row with all 10 fields
+        # set to None. Publishing the event last ensures consumers never see
+        # ``session.completed`` while the DB still holds a live row.
         self._active_session = None
         self._pending_replacement = None
+        self._persist_session_state(session)
+        self._write_and_publish(
+            "session.completed",
+            {"session_id": event_session_id},
+        )
         return self.build_snapshot(session)
 
     def review_pair_replacement(
@@ -188,6 +363,8 @@ class SessionControlService:
             created_at=datetime.now(UTC),
         )
         review = self._build_replacement_review(current_signal=current_signal, candidate=candidate)
+        # write-through: persist the new pending review before publishing.
+        self._persist_session_state(session)
         self._write_and_publish(
             "session.replacement.reviewed",
             {
@@ -212,23 +389,30 @@ class SessionControlService:
         if candidate is None:
             raise ValueError("replacement candidate is no longer available")
 
+        # Capture payload before mutating/clearing the in-memory record.
+        event_session_id = self._active_session.session_id
         self._active_session.current_pair_symbol = candidate.symbol
         self._active_session.current_signal_id = candidate.signal_id
         self.workspace_service.set_focus(
             symbol=candidate.symbol,
             focus_source="session_replacement",
             signal_id=candidate.signal_id,
+            session=session,
         )
+        # Clear the pending record, then persist a full snapshot: the
+        # updated active session with the new pair/signal and a cleared
+        # pending_* set.
+        self._pending_replacement = None
+        self._persist_session_state(session)
         self._write_and_publish(
             "session.replacement.applied",
             {
-                "session_id": self._active_session.session_id,
+                "session_id": event_session_id,
                 "review_id": review_id,
                 "symbol": candidate.symbol,
                 "signal_id": candidate.signal_id,
             },
         )
-        self._pending_replacement = None
         return self.build_snapshot(session)
 
     def _build_preflight(

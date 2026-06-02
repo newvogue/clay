@@ -1,0 +1,17 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic",
+  "include": [
+    "src",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/node_modules",
+    ".venv",
+    "alembic"
+  ]
+}

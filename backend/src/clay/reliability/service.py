@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from clay.ai_control.service import AIControlService
 from clay.audit.writer import AuditWriter
@@ -11,6 +11,7 @@ from clay.control_center.service import ControlCenterService
 from clay.demo_trading.models import DemoTradingSnapshot
 from clay.demo_trading.service import DemoTradingService
 from clay.events.bus import EventBus
+from clay.db.repositories_runtime_state import ReliabilityStateRepository
 from clay.reliability.models import (
     DegradedTriggerSnapshot,
     LocalFallbackReadinessSnapshot,
@@ -36,6 +37,7 @@ class ReliabilityService:
         validation_lab_service: ValidationLabService,
         audit_writer: AuditWriter,
         event_bus: EventBus,
+        session_factory: sessionmaker | None = None,
     ) -> None:
         self.control_center_service = control_center_service
         self.ai_control_service = ai_control_service
@@ -44,7 +46,19 @@ class ReliabilityService:
         self.validation_lab_service = validation_lab_service
         self.audit_writer = audit_writer
         self.event_bus = event_bus
-        self._last_rechecked_at: datetime | None = None
+        self.session_factory = session_factory
+        # ``_last_rechecked_at`` is restored from the
+        # ``ops.reliability_state`` singleton row when a ``session_factory``
+        # is supplied. Without one (legacy callers and pre-A5 tests), the
+        # service falls back to ``None`` (never rechecked) and stays
+        # non-persistent.
+        if session_factory is None:
+            self._last_rechecked_at: datetime | None = None
+        else:
+            with session_factory() as session:
+                state = ReliabilityStateRepository(session).get_or_create()
+                self._last_rechecked_at = state.last_rechecked_at
+                session.commit()
 
     def build_snapshot(self, session: Session) -> ReliabilitySnapshot:
         now = datetime.now(UTC)
@@ -109,9 +123,52 @@ class ReliabilityService:
             incidents=control_snapshot.incidents,
         )
 
-    def recheck(self, session: Session) -> ReliabilitySnapshot:
+    def recheck(self, session: Session, *, emit: bool = True) -> ReliabilitySnapshot:
+        """Re-evaluate reliability and (optionally) publish a recheck event.
+
+        ``emit=True`` (default) preserves the pre-B4 manual-route
+        contract: one ``reliability.rechecked`` audit and one
+        ``reliability.updated`` bus event per call, after the
+        ``last_rechecked_at`` write-through.
+
+        ``emit=False`` is the B4 scheduler-driven path: the
+        ``ReliabilityRecheckJob`` calls ``recheck(session, emit=False)``
+        and applies its own transition-only audit/bus policy via
+        :meth:`emit_recheck_events`. ``last_rechecked_at`` is
+        **always** persisted (in-memory + DB) regardless of
+        ``emit`` — it is the timestamp the operator trusts for
+        "how fresh is the latest recheck", and must survive a
+        process restart (A5 persistence contract).
+        """
         self._last_rechecked_at = datetime.now(UTC)
+        # write-through: persist the new timestamp before publishing.
+        # A restart between recheck and the audit/event publish keeps the
+        # timestamp in DB; consumers never see ``reliability.rechecked``
+        # while the DB still has a stale value. This write is independent
+        # of ``emit`` so the B4 scheduler-driven path (which calls
+        # ``recheck(emit=False)``) still updates the durable timestamp.
+        if self.session_factory is not None:
+            ReliabilityStateRepository(session).save(
+                last_rechecked_at=self._last_rechecked_at,
+            )
         snapshot = self.build_snapshot(session)
+        if emit:
+            self.emit_recheck_events(snapshot)
+        return snapshot
+
+    def emit_recheck_events(self, snapshot: ReliabilitySnapshot) -> None:
+        """Public entry point for the ``reliability.rechecked`` audit + bus events.
+
+        Single source of truth for the ``reliability.rechecked`` /
+        ``reliability.updated`` payloads — shared by the manual
+        ``POST /reliability/recheck`` route (``recheck(emit=True)``)
+        and the B4 ``ReliabilityRecheckJob`` (which calls
+        ``recheck(emit=False)`` and then invokes this method
+        directly on a transition). Keeping the payload shape in
+        one place prevents manual-route / scheduler-driven
+        drift (recon finding from
+        ``obs-2026-06-02-002-b4-recon-side-effect-concern.md``).
+        """
         self.audit_writer.write(
             "reliability.rechecked",
             {
@@ -127,7 +184,6 @@ class ReliabilityService:
                 "release_readiness_status": snapshot.summary.release_readiness_status,
             },
         )
-        return snapshot
 
     def _build_degraded_triggers(
         self,

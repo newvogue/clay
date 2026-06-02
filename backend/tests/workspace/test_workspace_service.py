@@ -192,7 +192,7 @@ def test_workspace_focus_selection_updates_focus_source(db_session) -> None:
     db_session.commit()
 
     service = build_workspace_service()
-    service.set_focus(symbol="SOLUSDT", focus_source="monitoring_click")
+    service.set_focus(symbol="SOLUSDT", focus_source="monitoring_click", session=db_session)
     snapshot = service.build_snapshot(db_session)
 
     assert snapshot.focus_pair.symbol == "SOLUSDT"

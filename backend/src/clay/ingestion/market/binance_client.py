@@ -39,6 +39,6 @@ class BinanceSpotClient:
                 params={"symbol": symbol, "interval": interval, "limit": limit},
                 timeout=self.timeout,
             )
-        response.raise_for_status()
-        payload = response.json()
-        return list(payload)
+            response.raise_for_status()
+            payload = response.json()
+            return list(payload)

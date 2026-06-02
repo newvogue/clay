@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from clay.ai_control.models import (
     AIControlSnapshot,
@@ -18,6 +18,11 @@ from clay.ai_control.models import (
 )
 from clay.audit.writer import AuditWriter
 from clay.config.loader import ConfigLoader
+from clay.db.repositories_runtime_state import (
+    AIAssignmentRepository,
+    AIControlStateRepository,
+    INITIAL_ASSIGNMENTS,
+)
 from clay.events.bus import EventBus
 from clay.preflight.service import PreflightService
 from clay.runtime.manager import RuntimeManager
@@ -69,25 +74,63 @@ class AIControlService:
         config_loader: ConfigLoader,
         audit_writer: AuditWriter,
         event_bus: EventBus,
+        session_factory: sessionmaker | None = None,
     ) -> None:
         self.runtime_manager = runtime_manager
         self.preflight_service = preflight_service
         self.config_loader = config_loader
         self.audit_writer = audit_writer
         self.event_bus = event_bus
+        self.session_factory = session_factory
         self.roles = self._build_role_registry()
         self.models = self._build_model_registry()
-        self.assignments: dict[str, str] = {
-            "chief-agent": "openai-gpt-5.4",
-            "market-scanner": "openai-gpt-5.4-mini",
-            "news-sentiment-agent": "anthropic-claude-sonnet-4.5",
-            "forecast-model": "gemini-2.5-flash",
-        }
-        self._last_reviewed_at: datetime | None = None
-        self._pending_review: PendingReview | None = None
+        # ``assignments``, ``_last_reviewed_at`` and ``_pending_review`` are
+        # restored from the ``ops`` runtime-state tables when a
+        # ``session_factory`` is supplied. Without one (legacy callers and
+        # pre-A3 tests), the service falls back to the in-memory defaults
+        # and stays non-persistent.
+        # ``roles`` and ``models`` remain code-only registries.
+        if session_factory is None:
+            # Use the canonical INITIAL_ASSIGNMENTS map so the in-memory
+            # fallback never drifts from the source of truth (A3 follow-up).
+            self.assignments: dict[str, str] = dict(INITIAL_ASSIGNMENTS)
+            self._last_reviewed_at: datetime | None = None
+            self._pending_review: PendingReview | None = None
+        else:
+            with session_factory() as session:
+                assignments_repo = AIAssignmentRepository(session)
+                state_repo = AIControlStateRepository(session)
+
+                persisted_assignments = assignments_repo.read_all()
+                if not persisted_assignments:
+                    assignments_repo.bulk_upsert(INITIAL_ASSIGNMENTS)
+                    persisted_assignments = dict(INITIAL_ASSIGNMENTS)
+                self.assignments = persisted_assignments
+
+                state = state_repo.get_or_create()
+                self._last_reviewed_at = state.last_reviewed_at
+                if state.pending_review_id is not None:
+                    # The 4 pending_* columns are written/cleared together,
+                    # so a non-null ``pending_review_id`` implies the rest
+                    # are also populated. The fallbacks below are defensive
+                    # only.
+                    self._pending_review = PendingReview(
+                        review_id=state.pending_review_id,
+                        role_id=state.pending_review_role_id or "",
+                        model_id=state.pending_review_model_id or "",
+                        created_at=state.pending_review_created_at or datetime.now(UTC),
+                    )
+                else:
+                    self._pending_review = None
+                session.commit()
 
     def build_snapshot(self, session: Session | None = None) -> AIControlSnapshot:
-        del session  # `E5` storage layer is intentionally in-memory for v1 bootstrap.
+        # ``session`` is accepted for API uniformity with the other
+        # ``build_snapshot(session)`` services in the project and because
+        # ``apply_assignment`` forwards it through. Snapshot construction
+        # itself only reads the in-memory state restored at __init__, so
+        # a missing session is still valid (e.g. ``signal_engine`` calls
+        # us without one).
         now = datetime.now(UTC)
         conflicts = self._build_conflicts()
         assignments = self._build_assignments(conflicts=conflicts)
@@ -143,7 +186,13 @@ class AIControlService:
             pending_review=pending_review,
         )
 
-    def review_assignment(self, role_id: str, model_id: str) -> ReviewCardSnapshot:
+    def review_assignment(
+        self,
+        role_id: str,
+        model_id: str,
+        *,
+        session: Session,
+    ) -> ReviewCardSnapshot:
         self._validate_role_and_model(role_id, model_id)
         self._pending_review = PendingReview(
             review_id=str(uuid4()),
@@ -152,9 +201,18 @@ class AIControlService:
             created_at=datetime.now(UTC),
         )
         self._last_reviewed_at = self._pending_review.created_at
+        # write-through: persist the new pending review and last_reviewed_at
+        # immediately so a restart between review and apply still sees them.
+        AIControlStateRepository(session).save(
+            last_reviewed_at=self._last_reviewed_at,
+            pending_review_id=self._pending_review.review_id,
+            pending_review_role_id=self._pending_review.role_id,
+            pending_review_model_id=self._pending_review.model_id,
+            pending_review_created_at=self._pending_review.created_at,
+        )
         return self._build_review_card(self._pending_review)
 
-    def apply_assignment(self, review_id: str) -> AIControlSnapshot:
+    def apply_assignment(self, review_id: str, *, session: Session) -> AIControlSnapshot:
         if self._pending_review is None or self._pending_review.review_id != review_id:
             raise ValueError("review card is missing or stale")
 
@@ -163,7 +221,23 @@ class AIControlService:
             raise ValueError("review card blocks apply")
 
         previous_model_id = self.assignments[self._pending_review.role_id]
-        self.assignments[self._pending_review.role_id] = self._pending_review.model_id
+        new_model_id = self._pending_review.model_id
+        # write-through: persist the new assignment and clear the pending
+        # review row before mutating in-memory state. If the DB write
+        # raises, in-memory state stays consistent with the previous
+        # commit, so the caller can safely retry.
+        AIAssignmentRepository(session).upsert(
+            self._pending_review.role_id,
+            new_model_id,
+        )
+        AIControlStateRepository(session).save(
+            last_reviewed_at=self._last_reviewed_at,
+            pending_review_id=None,
+            pending_review_role_id=None,
+            pending_review_model_id=None,
+            pending_review_created_at=None,
+        )
+        self.assignments[self._pending_review.role_id] = new_model_id
         self.audit_writer.write(
             "ai.assignment.applied",
             {
@@ -183,7 +257,78 @@ class AIControlService:
             },
         )
         self._pending_review = None
-        return self.build_snapshot()
+        return self.build_snapshot(session)
+
+    def set_assignment(
+        self,
+        *,
+        role_id: str,
+        model_id: str,
+        session: Session,
+    ) -> None:
+        """Promote ``model_id`` to the active model for ``role_id`` and persist.
+
+        **Trusted internal-caller path** — used by
+        ``validation_lab.apply_activation(target_type='model_assignment')``
+        (A5.5) to route activation-promotion through the A3 write-through
+        layer.
+
+        Unlike ``apply_assignment``, this method:
+
+        - does **not** require a pending review (``_pending_review`` is
+          untouched);
+        - does **not** mutate ``ai_control_state.last_reviewed_at`` (that
+          is owned by the operator-review workflow);
+        - does **not** mutate ``ai_control_state.pending_review_*``;
+        - does **not** re-evaluate ``preflight.blocks_apply`` (validation_lab
+          owns its own ``blocked``/``staged``/``ready`` posture gate
+          before reaching this method).
+
+        It **does** run the same role/model compatibility validation as
+        ``apply_assignment`` (``_validate_role_and_model``) so a single
+        source of truth governs what constitutes a valid assignment, and
+        it publishes on the same ``ai.updated`` event topic so downstream
+        subscribers (frontend snapshot refresh, runtime) react
+        identically. The audit verb is split (``ai.assignment.set`` vs
+        ``ai.assignment.applied``) so the trail distinguishes operator
+        applies from validation promotions, with ``source='validation_lab'``
+        in both audit and event payloads for unambiguous triage.
+
+        Idempotent: if ``model_id == previous_model_id`` the DB upsert
+        and audit/event emission still run (the upsert is idempotent, and
+        the trail is the same regardless of whether the in-memory value
+        changed).
+
+        Ordering follows the A3/A5 invariant: ``_validate_role_and_model``
+        → DB upsert (write-through, ``flush()`` only) → in-memory
+        mutation → audit → event. The caller owns the ``Session`` and
+        the surrounding ``commit()`` (see ``validation_lab.apply_activation``).
+        """
+        self._validate_role_and_model(role_id, model_id)
+        previous_model_id = self.assignments[role_id]
+        # write-through: DB upsert before in-memory mutation. If the DB
+        # write raises, in-memory state stays consistent with the last
+        # commit and the caller can safely retry.
+        AIAssignmentRepository(session).upsert(role_id, model_id)
+        self.assignments[role_id] = model_id
+        self.audit_writer.write(
+            "ai.assignment.set",
+            {
+                "role_id": role_id,
+                "previous_model_id": previous_model_id,
+                "model_id": model_id,
+                "source": "validation_lab",
+            },
+        )
+        self.event_bus.publish(
+            "ai.updated",
+            {
+                "role_id": role_id,
+                "previous_model_id": previous_model_id,
+                "model_id": model_id,
+                "source": "validation_lab",
+            },
+        )
 
     def _validate_role_and_model(self, role_id: str, model_id: str) -> None:
         if role_id not in self.roles:

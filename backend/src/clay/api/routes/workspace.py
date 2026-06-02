@@ -38,6 +38,7 @@ async def set_focus_pair(
         symbol=payload.symbol,
         focus_source=payload.focus_source,
         signal_id=payload.signal_id,
+        session=session,
     )
     snapshot = service.build_focus_snapshot(session).model_dump(mode="json")
     audit_writer.write(

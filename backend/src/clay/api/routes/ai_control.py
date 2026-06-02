@@ -22,10 +22,15 @@ async def get_ai_control_overview(
 @router.post("/assignments/review")
 async def review_ai_assignment(
     command: AssignmentReviewCommand,
+    session: Annotated[Session, Depends(get_db_session)],
     service: Annotated[AIControlService, Depends(get_ai_control_service)],
 ) -> dict[str, object]:
     try:
-        snapshot = service.review_assignment(command.role_id, command.model_id)
+        snapshot = service.review_assignment(
+            command.role_id,
+            command.model_id,
+            session=session,
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return snapshot.model_dump(mode="json")
@@ -37,9 +42,8 @@ async def apply_ai_assignment(
     session: Annotated[Session, Depends(get_db_session)],
     service: Annotated[AIControlService, Depends(get_ai_control_service)],
 ) -> dict[str, object]:
-    del session
     try:
-        snapshot = service.apply_assignment(command.review_id)
+        snapshot = service.apply_assignment(command.review_id, session=session)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return snapshot.model_dump(mode="json")

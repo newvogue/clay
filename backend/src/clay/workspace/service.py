@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from clay.db.repositories_context import ContextRepository
 from clay.db.repositories_market import MarketRepository
 from clay.db.repositories_ops import OpsRepository
+from clay.db.repositories_runtime_state import WorkspaceFocusRepository
 from clay.freshness.evaluator import collapse_market_statuses, resolve_market_freshness_status
 from clay.preflight.service import PreflightService
 from clay.runtime.manager import RuntimeManager
@@ -71,14 +72,34 @@ class WorkspaceService:
         preflight_service: PreflightService,
         registry: ServiceRegistry,
         signal_engine_service: SignalEngineService,
+        session_factory: sessionmaker | None = None,
     ) -> None:
         self.runtime_manager = runtime_manager
         self.preflight_service = preflight_service
         self.registry = registry
         self.signal_engine_service = signal_engine_service
-        self._focus_symbol: str | None = None
-        self._focus_source: str = "system_recommendation"
-        self._selected_signal_id: str | None = None
+        self.session_factory = session_factory
+        # ``_focus_symbol`` / ``_focus_source`` / ``_selected_signal_id`` are
+        # restored from the ``ops.workspace_focus`` singleton row when a
+        # ``session_factory`` is supplied. Without one (legacy callers and
+        # pre-A5 tests), the service falls back to the in-memory defaults
+        # and stays non-persistent.
+        if session_factory is None:
+            self._focus_symbol: str | None = None
+            self._focus_source: str = "system_recommendation"
+            self._selected_signal_id: str | None = None
+        else:
+            with session_factory() as session:
+                self._restore_focus_from_db(session)
+                session.commit()
+
+    def _restore_focus_from_db(self, session: Session) -> None:
+        state = WorkspaceFocusRepository(session).get_or_create()
+        # All three fields are safely nullable / have defaults: an empty
+        # row is a valid "no focus" state.
+        self._focus_symbol = state.focus_symbol
+        self._focus_source = state.focus_source
+        self._selected_signal_id = state.selected_signal_id
 
     def set_focus(
         self,
@@ -86,10 +107,20 @@ class WorkspaceService:
         symbol: str,
         focus_source: str,
         signal_id: str | None = None,
+        session: Session,
     ) -> None:
         self._focus_symbol = symbol
         self._focus_source = focus_source
         self._selected_signal_id = signal_id
+        # write-through: persist the new focus immediately. If the DB
+        # write raises, in-memory state stays consistent with the previous
+        # commit and the caller can safely retry.
+        if self.session_factory is not None:
+            WorkspaceFocusRepository(session).save(
+                focus_symbol=self._focus_symbol,
+                focus_source=self._focus_source,
+                selected_signal_id=self._selected_signal_id,
+            )
 
     def build_snapshot(self, session: Session) -> WorkspaceSnapshot:
         now = datetime.now(UTC)
@@ -105,9 +136,19 @@ class WorkspaceService:
             )
 
         focus_context = self._pick_focus_context(pair_contexts)
-        self._focus_symbol = focus_context.symbol
-        if focus_context.active_signal_id is not None:
-            self._selected_signal_id = focus_context.active_signal_id
+        if self._focus_source == "system_recommendation":
+            # Ephemeral focus: refresh in-memory from the auto-pick. This
+            # is the normal flow for system-recommendation — it is
+            # deterministically recomputed on every build_snapshot and
+            # does not need to survive across calls.
+            self._focus_symbol = focus_context.symbol
+            if focus_context.active_signal_id is not None:
+                self._selected_signal_id = focus_context.active_signal_id
+        # Else: an explicit (operator- or session-set) focus is in effect.
+        # We MUST NOT overwrite it from the auto-pick result: the explicit
+        # focus is the whole point of workspace persistence (D1), and a
+        # post-restart build_snapshot would otherwise wipe it before the
+        # operator can react.
         workspace_state = self._refine_workspace_state(
             base_state=workspace_state,
             focused_signal_state=focus_context.active_signal_state,
