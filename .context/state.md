@@ -1,59 +1,47 @@
 # Текущее Состояние
 
-**Дата:** 2026-06-02/03
-**Где остановились:** Wave A (persistence) — все 10 слайсов done ✅. **Wave B (scheduler & lifespan) — B0 + B1 + B2 + B3 + B4 + B4.5 + B5 done ✅** (7/8 слайсов). `pytest -q` → **236 passed** (216 → 236, +20 net, B5 ingestion cycle job). **B6** (integration tests + ADR-007) — **финальный slice Wave B, pending**.
-**Следующий шаг:** **B6** — `LifespanManager` integration tests + ADR-007 doc.
-**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **B5 done ✅** (commit `bf87c2c`), B6 pending. Полный план: [handoffs/b5-plan-2026-06-02.md](handoffs/b5-plan-2026-06-02.md) (для архитектора; **code-фаза закрыта в этом коммите**).
+**Дата:** 2026-06-03
+**Где остановились:** Wave A (persistence) — все 10 слайсов done ✅. **Wave B (scheduler & lifespan) — ВСЕ 9 слайсов done ✅ (CLOSED)**: B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + B6. `pytest -q` → **249 passed** (236 → 249, +13 net, B6 integration tests). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors). Branch ahead of `origin/main` на 3 коммита (`bf87c2c` + `eba64bb` + `6af56a3`).
+**Следующий шаг:** **Opus пишет ADR-007** из `handoffs/b6-adr-007-packet-2026-06-03.md`. После ADR-007 landing → **Wave B formally closed** → Wave C planning (TBD).
+**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **B6 done ✅** (commit `6af56a3`, 13 integration tests). Packet для архитектора: [handoffs/b6-adr-007-packet-2026-06-03.md](handoffs/b6-adr-007-packet-2026-06-03.md) (Opus пишет `docs/mission-control/adrs/adr-007-*.md` отсюда).
 
 ## 🛑 Точка остановки (session handoff)
 
-**Сессия 2026-06-02/03.** Wave B: B0 + B1 + B2 + B3 + B4 + B4.5 + **B5 done ✅** (7/8 слайсов). **236 passed** (216 → 236, +20 net). 0 регрессий. CLI-pyright 184 → 189 (+5, все pre-existing patterns в новых test-файлах). **B5 commit** `bf87c2c feat(scheduler): ingestion cycle job, async on loop with concurrency guard`.
+**Сессия 2026-06-03.** **Wave B CLOSED ✅ (9/9 слайсов):** B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + **B6 done ✅** (финальный slice, 13 integration tests, commit `6af56a3`). **249 passed** (236 → 249, +13 net, 0 regressions, 11.37s). CLI-pyright 189 = B5 baseline (0 new src-errors).
 
-**B5 highlights:**
-- **🔴 Fragment D mandatory code fix applied:** `add_ingestion_cycle_job()` → `func=self._arun_safely` (async), НЕ `self._run_safely` (sync). Sync wrapper НЕ заавейтит coroutine `job.run` (тихий no-op, ingestion cycle не исполняется). Routing matrix + text plan = `_arun_safely`; fragment D был typo — кодировал per matrix.
-- **Two wrappers + shared `_handle_job_error`:** sync `_run_safely` UNCHANGED (B3b/B4 → ThreadPoolExecutor); NEW async `_arun_safely` (B5 → event loop); shared `_handle_job_error` (B3b default / B4-on_error / B5-isolated в одном месте, no duplication). Поправка 1 applied.
-- **`upsert_freshness_status → bool` (Поправка 2):** INSERT or state-change = True, timestamp-only = False. `IngestionRunSummary.freshness_state_transitions: int` field. Steady state = 0 → no emit. Anti-flood correctness: ~10-50 audit/день.
-- **Counter split:** `market_records_inserted` + `market_records_updated` (computed `market_records_written` для backward-compat с pre-B5 `assert ... == 4`).
-- **`IngestionCycleService` + asyncio.Lock + is_running:** lock покрывает весь `_do_run_once` (TOCTOU mitigation explicit). Manual route → 409 (`IngestionCycleBusy`), scheduler-job → skip+log.
-- **Public `emit_cycle_events(summary)`** — single source of payload (manual route + job anti-flood transition).
-- **B4 #11 carry-forward:** `_failing` reset on success (Acceptance #11, `fail → success → fail` = 2 audit). Anti-flood per failing episode.
-- **+20 net tests** (5 service + 10 job + 1 route + 4 scheduler). Все зелёные.
-- **A6 invariant соблюдён:** `grep "import clay.bootstrap" backend/src/clay/scheduler/` = 0 matches.
+**B6 highlights:**
+- **13 integration тестов** в `backend/tests/integration/test_scheduler_lifespan.py` (NEW, 461 LOC). Изоляция: `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps. Покрывают: 3 jobs registered, session-scheduler state walk, APScheduler STATE_RUNNING, **routing matrix (sync `_run_safely` vs async `_arun_safely` — B5 fragment D fix integration-level confirmation)**, audit events scheduler.started/stopped, env-gates (RELIABILITY_ENABLED, INGESTION_ENABLED), app.state reset, B3a soft-debt double-startup pin, real-tick smoke, 2 partial-failure anti-tests (startup-fail, shutdown-fail).
+- **🔴 Confirm (a) verified + pinned by test #12:** `scheduler.start()` (lifespan.py:96) ДО `app.state.scheduler = scheduler` (lifespan.py:97). При raise в start() → `app.state.scheduler` остаётся `None` (от guard lifespan.py:80). Тест #12 инжектит fail в `add_health_tick_job` (scheduler/service.py:171) → `LifespanManager` re-raises + `app.state.scheduler is None` + audit пуст.
+- **🔴 Confirm (b) verified:** `registry.update_status` (services/registry.py:32-40) — pure mutation, БЕЗ `audit_writer.write` внутри. `service.status_changed` пишется ТОЛЬКО call-sites: `ClayScheduler._handle_job_error` (scheduler/service.py:456-464, per-tick exception) + `HealthTickJob.run` (scheduler/jobs.py:179, per-tick transition). `bootstrap.py:148` `update_status("control-api", HEALTHY)` — **silent** (current behaviour, open question для ADR-007).
+- **B6 cleanup:** удалён redundant `session.commit()` в `IngestionCycleJob.run()` (B5 dead code — `_do_run_once` уже коммитит под `asyncio.Lock`, ingestion/service.py:177). B5 unit test `test_run_calls_run_once_emit_false_and_commits` обновлён (assert убран, docstring обновлён).
+- **ADR-007 packet:** `.context/handoffs/b6-adr-007-packet-2026-06-03.md` (~30KB, 12 sections) — extract для Opus. **Агент НЕ пишет** `docs/mission-control/adrs/adr-007-*.md` (это deliverable архитектора per `docs/mission-control/adrs/adr-001..005` convention).
+- **Routing matrix на живом scheduler (verify):** `inspect.iscoroutinefunction` подтверждает — `health-tick.func` + `reliability-recheck.func` = sync, `ingestion-cycle.func` = async. B5 fragment D fix = ✅ на integration уровне.
+- **Commit hygiene Флаг 1 closed:** HEAD `eba64bb` (chore-commit "throwaway" для make HEAD buildable, ratified Emma 2026-06-03). Future full 12-split вынесен в отдельную git-сессию (B6 не блокирует).
 
 **Возобновление:**
-  1. **Emma** делает ревью B5 commit `bf87c2c` (или отклоняет — тогда чиню)
-  2. (опц.) **Emma** делает `chore(types)` commit для 5 B5 + 2 B4 test-fake + 184 pre-existing patterns = 191 errors → единый burn-down slice
-  3. **B6** — `LifespanManager` integration tests + ADR-007 (финальный slice Wave B)
-  4. После B6 → Wave B closed. → Wave C: planning (TBD)
-
-**Wave B scope (оставшийся):** B5 (IngestionCycleJob — manual route → scheduler-driven, **применить ту же ADR-007 pre-flight recon что в B4**) → B6 (integration tests + ADR-007 documentation).
+  1. **Emma** ревью B6 commit `6af56a3` (или отклоняет — тогда чиню)
+  2. **Opus (архитектор)** пишет `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` из `handoffs/b6-adr-007-packet-2026-06-03.md` → **Wave B formally closed**
+  3. **Отдельная git-сессия** для `git reset --soft bf87c2c~1` + N logical commits (12 по Emma's ratify). Out of B6 scope.
+  4. **Отдельная `chore(types)` сессия** для 189 pyright errors (pre-existing test-fake type-debt). Out of B6 scope.
+  5. **Wave C planning** (TBD) — next engineering wave.
 
 ## Что сделано за последнюю сессию
 - 2026-06-01: развёрнута vendor-agnostic система памяти `.context/` в проекте Clay
 - 2026-06-01: **Wave A / persistence (10 слайсов done ✅)** (A0→A5.5+A6, pytest 188)
-- 2026-06-02: **Wave B / scheduler & lifespan — B0 + B1 + B2 + B3 + B4 + B4.5 done ✅** (6/8 слайсов)
-  1. **B0 recon** — карта по 8 пунктам + декомпозиция B1-B6
-  2. **B1 lifespan skeleton** — `apscheduler`+`asgi-lifespan`, `lifespan.py` boot-order. 189 passed
-  3. **B2 HealthMonitor factory wiring** — factory wires `HealthMonitor(stale_after_seconds=settings)`. 190 passed
-  4. **B3a ClayScheduler scaffold** — `SchedulerSettings`, `ClayScheduler` (sync facade), lifespan-wiring. 194 passed
-  5. **B3b HealthTickJob + transition-audit** — heartbeat-scope, recovery, anti-flood. 200 passed
-  6. **B4 ReliabilityRecheckJob** (финал предыдущего handoff)
-     - `reliability_service.recheck(emit: bool = True)` + публичный `emit_recheck_events(snapshot)` (single source of payload)
-     - `settings/scheduler.py` + `reliability_enabled: bool = True` (env `CLAY_SCHEDULER_RELIABILITY_ENABLED`)
-     - `ReliabilityRecheckJob` (DI через `_ReliabilityRecheckable` Protocol, first-run seed, transition-diff на 3 полях, `_failing` reset на success, isolated `on_error` — НЕ мутирует `session-scheduler`, НЕ re-raise)
-     - `ClayScheduler._run_safely(..., on_error=None)` параметризован (B3b by construction no-touch, B4 (a) error-policy isolation)
-     - `ClayScheduler.add_reliability_recheck_job()` (3 gates: flag, deps, registration; **loud warning** при missing deps с названием отсутствующего)
-     - `ClayScheduler.start()` обновлён: `jobs` from `apscheduler.get_job()` (Q2 Emma, single source of truth)
-     - `bootstrap.py` +module-level `session_factory` export (нужен для `lifespan.py`)
-     - `api/lifespan.py` pass `reliability_service` + `session_factory` в `ClayScheduler`
-     - **15 новых тестов** (8 в `test_reliability_recheck_job.py` + 5 в `test_clay_scheduler.py` + 2 в `test_reliability_service.py`)
-     - **200 → 215 passed**. 0 регрессий.
-  7. **B4.5 binance_client response-after-async-with fix** (текущий handoff)
-     - `binance_client.py:36-44` else-ветка: `response.raise_for_status()` / `response.json()` / `return list(payload)` перенесены **внутрь** `async with httpx.AsyncClient() as client:` (4 строки, mechanical dedent, +0 net LOC)
-     - Injected-client ветка (26-34) не тронута (structurally identical contract)
-     - **+1 new test:** `tests/ingestion/market/test_binance_client.py::test_fetch_klines_returns_parsed_payload` (httpx.MockTransport happy-path, first direct coverage of `BinanceSpotClient`)
-     - **215 → 216 passed**. 0 регрессий. CLI-pyright 0 new errors (184 → 184)
-     - **Framing:** smell-fix (httpx non-streaming body buffer guarantees), не live data-corruption. Test ценен как contract pin + first coverage, не как regression guard
+- 2026-06-02: **Wave B / scheduler & lifespan — B0 + B1 + B2 + B3 + B4 + B4.5 + B5 done ✅** (7/8 слайсов, 236 passed, commit `bf87c2c`)
+- 2026-06-03: **Wave B CLOSED ✅ — B6 done ✅** (финальный slice, 9/9, 249 passed, commit `6af56a3`)
+  1. **B6 pre-flight recon** (через `explore` subagent) — side-effect map, audit ordering, partial-failure matrix, env-gate surface, ADR-007 location question. **Обнаружена дыра:** `pyproject.toml` (B1) не закоммичен в `bf87c2c` → HEAD не билдится. **Также recon over-reported:** `registry.update_status` (services/registry.py:32-40) — pure mutation, БЕЗ audit, вопреки первоначальной гипотезе. Поправлено в §5 recon.
+  2. **Commit hygiene Флаг 1 (Emma's call):** `git add -A && commit "chore(wave-ab): commit remaining A1-B4 source + scheduler deps to make HEAD buildable"` (commit `eba64bb`, 65 files, +9835/-57, throwaway). HEAD стал собираемым (`git status` clean + `uv sync` 42 pkg + 236 passed + import OK). Full 12-split вынесен в отдельную git-сессию.
+  3. **B6 code-фаза:**
+     - **13 integration тестов** в `backend/tests/integration/test_scheduler_lifespan.py` (NEW, 461 LOC, 11.37s full suite). Standard 9 + 4 точечных (apscheduler.state, routing matrix, real-tick smoke, 2 partial-failure). Изоляция: `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps (8 scheduler-deps + `scheduler_settings`).
+     - **Confirm (a) verified + pinned:** `scheduler.start()` ДО `app.state.scheduler = scheduler` (lifespan.py:96-97). Тест #12 injects fail в `add_health_tick_job` → re-raise + `app.state.scheduler is None` + audit empty.
+     - **Confirm (b) verified:** `registry.update_status` — pure mutation. `service.status_changed` пишется ТОЛЬКО call-sites. `bootstrap.py:148` `control-api` transition — silent (open question для ADR-007).
+     - **B6 cleanup:** redundant `session.commit()` в `IngestionCycleJob.run()` удалён (dead code — `_do_run_once` уже коммитит под `asyncio.Lock`). B5 unit test обновлён.
+     - **asyncio.Lock verify:** `run_once` (ingestion/service.py:145-146) оборачивает `await self._do_run_once(session)` в `async with self._lock:` — весь body (market + context + commit) под lock. ✅
+     - **Routing matrix на живом scheduler:** `inspect.iscoroutinefunction` подтверждает — sync jobs → sync wrapper, ingestion-cycle → async wrapper. B5 fragment D fix = ✅ integration-level.
+     - **+13 net tests.** 236 → 249. **0 regressions.** CLI-pyright 189 = B5 baseline (0 new src-errors).
+  4. **ADR-007 packet extracted:** `.context/handoffs/b6-adr-007-packet-2026-06-03.md` (~30KB, 12 sections: TL;DR + lifespan contract + audit chokepoint + env-gate surface + job registration matrix + side-effect-free precondition + partial-failure matrix + single-worker + lifespan side-effect boundary + B6 test index + 5 open questions + B6 commit scope). **Агент НЕ пишет** `docs/mission-control/adrs/adr-007-*.md` (deliverable Opus, per `docs/mission-control/adrs/adr-001..005` convention).
+  5. **B6 commit:** `6af56a3 test(scheduler): B6 integration tests + ADR-007 packet` (4 files, +856/-6). Working tree clean. Branch ahead of origin/main на 3 коммита.
 
 ### B4 highlights (финальный slice сессии)
 

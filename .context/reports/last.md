@@ -1,389 +1,280 @@
-# Report: B5 (Wave B / scheduler & lifespan — slice 5: IngestionCycleJob, async on loop with concurrency guard)
+# Report: B6 (Wave B finale — integration tests + ADR-007 packet)
 
-> **Сессия 2026-06-02/03.** Wave B progress: B0 + B1 + B2 + B3 + B4 + B4.5 + **B5 done ✅** (7/8 слайсов) + B6 (integration tests + ADR-007) pending. **236 passed** (216 → 236, +20 net). 0 регрессий. CLI-pyright: 189 errors (184 → 189, +5 — все 5 в новых test-файлах, pre-existing patterns).
+> **Сессия 2026-06-03.** Wave B CLOSED ✅ (B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + **B6** = 9/9 slices). **249 passed** (236 → 249, +13 net, 0 regressions, 11.37s). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors; pre-existing test-fake type-debt in B4/B5 unit tests is in `chore(types)` burn-down backlog).
 >
-> **B5** — `IngestionCycleJob` (async coroutine, registered via `_arun_safely`), `IngestionCycleService` (asyncio.Lock + is_running + emit-gating), `upsert_freshness_status → bool` (Поправка 2), counter split `market_records_inserted/updated` + computed `market_records_written`, manual route 409 на busy. **🔴 Обязательная правка fragment D** применена: `func=self._arun_safely` в `add_ingestion_cycle_job()`.
+> **B6** — 13 integration tests in `tests/integration/test_scheduler_lifespan.py` verify the full scheduler layer through the FastAPI lifespan: 3 jobs registered, `session-scheduler` state walk, APScheduler STATE_RUNNING, **routing matrix (sync vs async, B5 fragment D fix integration-level confirm)**, `scheduler.started` / `scheduler.stopped` audit events, env-gate semantics (RELIABILITY_ENABLED / INGESTION_ENABLED), `app.state` reset, B3a soft-debt double-startup pin, real-tick smoke (health-tick interval=1s, 2.5s wait, `health.tick` on bus), 2 partial-failure anti-tests. ADR-007 packet: `handoffs/b6-adr-007-packet-2026-06-03.md` — extract for architect; agent does NOT write the ADR file.
 >
-> **Следующий слайс Wave B:** B6 (integration tests + ADR-007) — финал.
+> **B6 cleanup:** removed redundant `session.commit()` in `IngestionCycleJob.run()` — the commit already happens inside `IngestionCycleService._do_run_once` under the service's `asyncio.Lock` (`ingestion/service.py:177`). Prior commit was a harmless no-op; removed for clarity. B5 unit test updated accordingly.
+>
+> **Next:** Opus (architect) writes `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` from the packet. After ADR-007 lands: Wave B fully closed. Wave C planning TBD.
+>
+> **Two MANDATORY confirms (verified by B6 tests, cited in ADR-007 packet):**
+> - **(a)** `scheduler.start()` runs **BEFORE** `app.state.scheduler = scheduler` in `api/lifespan.py:96-97`. If `start()` raises, `app.state.scheduler` remains `None` (from guard on `lifespan.py:80`). Pinned by `test_startup_failure_keeps_state_clean` (#12).
+> - **(b)** `registry.update_status(...)` in `services/registry.py:32-40` is a **pure mutation** (no `audit_writer.write` inside). `service.status_changed` audit is written by call-sites only (`ClayScheduler._handle_job_error`, `HealthTickJob.run`). `bootstrap.py:148` `update_status("control-api", HEALTHY)` is **silent** — current behaviour, open question for ADR-007.
 
 ---
 
-**Slice:** B5 — `IngestionCycleJob` (async, scheduler-driven ingestion with concurrency guard).
-**Дата:** 2026-06-02/03
+**Slice:** B6 — Wave B finale (integration tests + ADR-007 packet).
+**Дата:** 2026-06-03
 **Агент:** M3 Free
-**Приёмка:** ✅ done (B5 plan v2 RATIFIED + fragment D mandatory code fix applied; см. §Acceptance verification)
-
-> **B5 done ✅** — `IngestionCycleJob` registered via `func=self._arun_safely` (async wrapper → event loop; НЕ `self._run_safely` per fragment D mandatory fix). `IngestionCycleService` + `asyncio.Lock` + `is_running` + `emit_cycle_events` (public). Manual route → 409 на `IngestionCycleBusy`. Two wrappers + shared `_handle_job_error` (B3b default / B4-on_error / B5-isolated error policies в одном месте, no duplication). `upsert_freshness_status → bool` (Поправка 2: anti-flood correctness). Counter split `market_records_inserted/updated` + computed `market_records_written` (backward-compat с pre-B5 `assert ... == 4`).
->
-> **`pytest -q` → 216 → 236** (+20 net, +3 выше плана +17: 5 service + 10 job + 1 route + 4 scheduler = 20). **B5 closed**. **0 регрессий.**
->
-> **CLI-pyright:** 184 → 189 (+5, все в test-файлах — pre-existing pattern `_FakeBinanceClient` / `_FakeSessionFactory` / `dict[str, int]` payload, см. §Deviations).
+**Приёмка:** ✅ done (236 → 249 passed, +13 net, 0 regressions, 0 new src-errors pyright; **1 коммит** `6af56a3` поверх `eba64bb`).
 
 ## Статус: **done** ✅
 
 | Acceptance | Результат |
 |---|---|
-| pytest baseline зелёный (216 passed) | ✅ (236 passed) |
-| +20 net tests (5 service + 10 job + 1 route + 4 scheduler) | ✅ все зелёные |
-| `IngestionCycleService` + `asyncio.Lock` + `is_running` + emit-gating | ✅ service-level lock + emit-after-release |
-| `IngestionRunSummary` + `market_records_inserted/updated` + `freshness_state_transitions` | ✅ counter split (computed `market_records_written`) |
-| `IngestionCycleJob` async, B4 pattern (first-run, transition, `_failing` reset) | ✅ B4 carry-forward (Emma's #11) |
-| `upsert_freshness_status` return `bool` (transition detected) | ✅ Поправка 2 — anti-flood correctness |
-| **🔴 `ClayScheduler._run_safely` SYNC UNCHANGED** (B3b/B4 routing preserved) | ✅ Поправка 1 — нет regression в routing |
-| **NEW `ClayScheduler._arun_safely` (async, для B5)** | ✅ mirror route 1:1 |
-| **NEW shared `_handle_job_error`** (вынесен из обоих wrappers) | ✅ no duplication |
-| **🔴 `add_ingestion_cycle_job()` → `func=self._arun_safely`** (НЕ `_run_safely`) | ✅ fragment D mandatory fix applied |
-| Manual route → 409 при `is_running` | ✅ `HTTPException(409, "ingestion cycle already running")` |
-| Scheduler job → skip+log при `is_running` | ✅ quiet (B4 #9 pattern) |
-| `ClayScheduler.add_ingestion_cycle_job()` (4 deps + loud warning) | ✅ Q1 pattern apply (4 deps, имена в warning) |
-| `start()` jobs (3 ids now) | ✅ Q2 pattern apply, `apscheduler.get_job()` |
-| `SchedulerSettings.ingestion_enabled` (env `CLAY_SCHEDULER_INGESTION_ENABLED`) | ✅ independent flag |
-| A6 invariant: `grep "import clay.bootstrap" backend/src/clay/scheduler/` | ✅ = 0 matches |
-| 0 регрессий | ✅ 6.62s, 160 warnings (same as B4 baseline) |
+| pytest baseline (236 passed) | ✅ (249 passed, +13 net) |
+| 13 integration tests в `tests/integration/test_scheduler_lifespan.py` | ✅ все зелёные (3.69s изолированно) |
+| Routing matrix на живом scheduler (sync vs async) | ✅ `inspect.iscoroutinefunction` подтверждает `_run_safely` для sync jobs, `_arun_safely` для ingestion-cycle |
+| Partial-failure anti-tests (#12 startup, #13 shutdown) | ✅ инварианты и minor quirks запинены |
+| Confirm (a) verified: `scheduler.start()` ДО `app.state.scheduler = scheduler` | ✅ `lifespan.py:96-97` + тест #12 |
+| Confirm (b) verified: `registry.update_status` — pure mutation, без audit | ✅ `services/registry.py:32-40` + recon §5 |
+| asyncio.Lock оборачивает весь `_do_run_once` (B5 verify) | ✅ `ingestion/service.py:145-146` (market + context + commit под lock) |
+| Лишний `session.commit()` в `IngestionCycleJob.run()` убран | ✅ `scheduler/jobs.py` — comment + dead code removed |
+| ADR-007 packet extracted в `handoffs/b6-adr-007-packet-2026-06-03.md` | ✅ 12 sections, ~30KB, ready for Opus |
+| CLI-pyright: 0 new src-errors | ✅ 189 = B5 baseline (pre-existing test-fake type-debt, `chore(types)` backlog) |
+| 0 regressions | ✅ 11.37s, 849 warnings (B5: 160, +689 mostly from real-tick smoke test polling) |
+| 1 коммит B6 | ✅ `6af56a3` (4 files, +856/-6) |
 
 ## 1. Изменённые / новые файлы
 
 | Файл | Статус | +/- | Notes |
 |---|---|---|---|
-| `backend/src/clay/db/repositories_market.py` | modified (B5) | +37 / -23 | `upsert_market_bars → (inserted, updated)` tuple; `upsert_freshness_status → bool` (Поправка 2: INSERT or state-change = True, timestamp-only = False) |
-| `backend/src/clay/ingestion/market/service.py` | modified (B5) | +2 / -1 | `persist_bars → (inserted, updated)` tuple (counter split carry-through) |
-| `backend/src/clay/ingestion/service.py` | modified (B5, near-rewrite) | +131 / -26 | `IngestionRunSummary` + `market_records_inserted/updated` (computed `market_records_written`); `IngestionCycleBusy` exception; `IngestionCycleService` + `asyncio.Lock` + `is_running` + `run_once(session, *, emit=True)` + `emit_cycle_events` public |
-| `backend/src/clay/settings/scheduler.py` | modified (B5) | +5 / -0 | + `ingestion_enabled: bool = True` (env `CLAY_SCHEDULER_INGESTION_ENABLED`) |
-| `backend/src/clay/scheduler/jobs.py` | modified (B5) | +235 / -0 | + `_IngestionCycleRunnable` Protocol + `IngestionCycleJob` (async, B4 pattern: DI + first-run seed + transition-diff на 2 полях `(incidents_present, freshness_state_transitions)` + `_failing` reset + isolated `on_error` + `is_running` short-circuit + `IngestionCycleBusy` race catch) |
-| `backend/src/clay/scheduler/service.py` | modified (B5) | +260 / -100 | Sync `_run_safely` UNCHANGED (B3b/B4 routing preserved); **NEW** async `_arun_safely` (B5 ingestion routing); **NEW** shared `_handle_job_error`; `add_ingestion_cycle_job()` (3 gates + 4 deps loud warning); `start()` jobs (3 ids now); `ingestion_cycle_service` constructor kwarg |
-| `backend/src/clay/scheduler/__init__.py` | modified (B5) | +8 / -2 | + re-export `IngestionCycleJob`, `ReliabilityRecheckJob` |
-| `backend/src/clay/api/routes/ingestion.py` | modified (B5) | +9 / -5 | Manual route: try `service.run_once(session, emit=True)`; catch `IngestionCycleBusy` → `HTTPException(409, "ingestion cycle already running")`; drop redundant manual `audit_writer.write` / `event_bus.publish` (now owned by `service.emit_cycle_events` internal) |
-| `backend/src/clay/api/lifespan.py` | modified (B5) | +2 / -0 | + pass `ingestion_cycle_service` to `ClayScheduler` |
-| `backend/src/clay/bootstrap.py` | modified (B5) | +3 / -1 | + pass `audit_writer=audit_writer, event_bus=event_bus` to `IngestionCycleService` |
-| `backend/tests/ingestion/test_ingestion_cycle_service.py` | **new** | +308 | 5 tests (default emit, emit=False, busy lock, freshness_state_transitions Поправка 2, counter split) |
-| `backend/tests/scheduler/test_ingestion_cycle_job.py` | **new** | +485 | 10 tests (B4 pattern: run_calls_run_once, first_run, steady, transition, on_error×3, fail→success→fail, skip-when-running, race-IngestionCycleBusy) |
-| `backend/tests/scheduler/test_clay_scheduler.py` | modified (B5) | +183 / -10 | + 4 tests (registered-when-enabled, not-registered-when-disabled, 3-ids payload, loud warning 4 deps); `_make_scheduler` helper extended (new `ingestion_cycle_service` kwarg) |
-| `backend/tests/api/test_ingestion_route.py` | **new** | +77 | 1 test (manual route 409 when busy) |
-| `backend/tests/db/test_ingestion_repositories.py` | modified (B5) | +1 / -1 | `assert written == 1` → `assert written == (1, 0)` (B5 tuple return) |
+| `backend/tests/integration/test_scheduler_lifespan.py` | **new** | +461 | 13 integration тестов; изоляция через `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps; `@pytest.mark.anyio` async |
+| `backend/src/clay/scheduler/jobs.py` | modified (B6 cleanup) | +5 / -3 | Удалён `session.commit()` после `run_once()` (B5 dead code — `_do_run_once` уже коммитит под `asyncio.Lock`); комментарий объясняет |
+| `backend/tests/scheduler/test_ingestion_cycle_job.py` | modified (B6 cleanup) | +5 / -3 | `test_run_calls_run_once_emit_false_and_commits`: убран `assert factory.sessions[0].committed is True` (больше не применимо — commit в `_do_run_once`); docstring обновлён |
+| `.context/handoffs/b6-adr-007-packet-2026-06-03.md` | **new** | +new | 12-секционный packet для Opus: lifespan contract, audit chokepoint, env-gate surface, job registration matrix, side-effect-free precondition, partial-failure matrix, single-worker assumption, lifespan side-effect boundary, B6 test index, 5 open questions, B6 commit scope |
 
-**Net:** 8 modified src, 3 new test files, 1 modified test. **+20 net tests** (216 → 236). ~+1740 LOC.
+**Net:** 1 new test file (461 LOC), 1 src cleanup (5 net), 1 test update (5 net), 1 packet (~30KB). **+13 net tests** (236 → 249).
 
 ## 2. Ключевые фрагменты
 
-### 2.1. `_arun_safely` + `_handle_job_error` (scheduler/service.py, B5 #1)
+### 2.1. Изоляция через monkeypatch + `build_services_for_integration` (test_scheduler_lifespan.py:96-122)
 
 ```python
-def _run_safely(
-    self,
-    job_callable: Callable[[], None],
-    *,
-    on_error: Callable[[Exception], None] | None = None,
-) -> None:
-    """Sync exception-safe wrapper — REGISTERED AS SYNC with APScheduler → ThreadPoolExecutor.
-    
-    Used by B3b ``HealthTickJob`` and B4 ``ReliabilityRecheckJob``.
-    Their sync DB-I/O MUST stay in the threadpool (B0 §11.1).
+@pytest.fixture
+def isolated_app(monkeypatch, tmp_path):
+    services = build_services_for_integration(tmp_path)
+    app = create_app()
+
+    # Redirect every ``lifespan`` module-level dep to the isolated service.
+    # Lifespan reads these names at runtime (not import time) — so the
+    # monkeypatch on the module attribute wins.
+    monkeypatch.setattr(lifespan_module, "_audit_writer", services["audit_writer"])
+    monkeypatch.setattr(lifespan_module, "_event_bus", services["event_bus"])
+    monkeypatch.setattr(lifespan_module, "_health_monitor", services["health_monitor"])
+    monkeypatch.setattr(lifespan_module, "_ingestion_cycle_service", services["ingestion_cycle_service"])
+    monkeypatch.setattr(lifespan_module, "_registry", services["registry"])
+    monkeypatch.setattr(lifespan_module, "_reliability_service", services["reliability_service"])
+    monkeypatch.setattr(lifespan_module, "_session_factory", services["session_factory"])
+    monkeypatch.setattr(lifespan_module, "scheduler_settings", services["scheduler_settings"])
+
+    return app, services
+```
+
+**Why not `app_with_sqlite` conftest fixture:** `app_with_sqlite` использует `dependency_overrides`, которые НЕ перехватывают **module-level imports** в `lifespan.py:55-64` (8 deps из `clay.bootstrap` как module-level константы). `monkeypatch` на module-level атрибуты — единственный способ изолировать scheduler-deps. **`dependency_overrides` изолируют только route-deps** (`get_db_session`, `get_ingestion_settings`).
+
+### 2.2. Routing matrix — integration-level confirm (test_scheduler_lifespan.py:108)
+
+```python
+@pytest.mark.anyio
+async def test_routing_matrix_sync_vs_async(isolated_app) -> None:
+    """§3 routing on the live scheduler:
+    * health-tick + reliability-recheck → sync _run_safely → ThreadPoolExecutor
+    * ingestion-cycle → async _arun_safely → event loop
+
+    This is the integration-level confirmation of Emma's B5 fragment D
+    mandatory code fix — a sync wrapper around an ``async def`` would
+    silently never await the coroutine, leaving ingestion dead.
     """
-    pre_status = self._registry.get(self._SERVICE_ID).status
-    try:
-        job_callable()
-    except Exception as exc:
-        self._handle_job_error(exc, pre_status, on_error)
+    app, _ = isolated_app
+    async with LifespanManager(app):
+        apscheduler = app.state.scheduler._apscheduler
+        for job_id in (HEALTH_TICK, RELIABILITY_RECHECK):
+            job = apscheduler.get_job(job_id)
+            assert job is not None
+            assert not inspect.iscoroutinefunction(job.func)
+        ingestion_job = apscheduler.get_job(INGESTION_CYCLE)
+        assert ingestion_job is not None
+        assert inspect.iscoroutinefunction(ingestion_job.func)
+```
 
-async def _arun_safely(
-    self,
-    job_callable: Callable[[], Awaitable[None]],
-    *,
-    on_error: Callable[[Exception], None] | None = None,
+**Detection:** `inspect.iscoroutinefunction(job.func)` — проверяет, является ли зарегистрированный callable `async def` функцией. Это определяет APScheduler routing (sync → threadpool, async → event loop), **не то, что wrapper вызывает внутри**. `__qualname__` (B5 unit-test pattern) тоже работает, но `iscoroutinefunction` семантически точнее.
+
+### 2.3. Partial-failure anti-test #12 — confirm (a) invariant (test_scheduler_lifespan.py:368)
+
+```python
+@pytest.mark.anyio
+async def test_startup_failure_keeps_state_clean(
+    isolated_app, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Async exception-safe wrapper — REGISTERED AS COROUTINE with APScheduler → event loop.
-    
-    Used by B5 ``IngestionCycleJob``. Mirrors POST /ingestion/run
-    1:1 (same sync-DB on loop that the manual route does in
-    production today, per Emma's [MED-A] ratification).
-    """
-    pre_status = self._registry.get(self._SERVICE_ID).status
-    try:
-        await job_callable()
-    except Exception as exc:
-        self._handle_job_error(exc, pre_status, on_error)
+    """Partial-failure anti-test (B6 §9 #12). If a step inside
+    ClayScheduler.start() raises, the LifespanManager re-raises,
+    app.state.scheduler stays None (confirm (a) invariant:
+    scheduler.start() runs BEFORE app.state.scheduler = scheduler
+    in lifespan.py:96-97), and scheduler.started is **not**
+    written to the audit log."""
+    app, services = isolated_app
+    audit_path = services["audit_writer"].path
 
-def _handle_job_error(
-    self,
-    exc: Exception,
-    pre_status: ServiceStatus,
-    on_error: Callable[[Exception], None] | None,
-) -> None:
-    """Shared error-policy between sync and async wrappers."""
-    if on_error is not None:
-        # B4/B5: job owns its error policy (e.g. isolated ``_failing``
-        # episode + dedicated audit verb; does NOT touch session-scheduler).
-        on_error(exc)
-        return
-    # Default B3b path: session-scheduler → ERROR, audit on transition only.
-    self._registry.update_status(
-        self._SERVICE_ID, ServiceStatus.ERROR, error=str(exc),
-    )
-    if pre_status != ServiceStatus.ERROR:
-        self._audit_writer.write(
-            "service.status_changed",
-            {
-                "service_id": self._SERVICE_ID,
-                "from": pre_status.value, "to": ServiceStatus.ERROR.value,
-                "error": str(exc),
-            },
-        )
-    logger.exception(
-        "clay.scheduler: scheduled job raised; session-scheduler marked ERROR",
-    )
+    def failing_add_health_tick(self) -> None:
+        raise RuntimeError("injected startup failure (B6 #12)")
+
+    monkeypatch.setattr(ClayScheduler, "add_health_tick_job", failing_add_health_tick)
+
+    with pytest.raises(RuntimeError, match="injected startup failure"):
+        async with LifespanManager(app):
+            pass  # body never reached — startup raised
+
+    # confirm (a) invariant: app.state.scheduler is None (from the
+    # guard on lifespan.py:80; line 97 never executes because
+    # scheduler.start() raised on line 96).
+    assert app.state.scheduler is None
+
+    if audit_path.exists():
+        events = _read_audit_events(audit_path)
+        started = _events_by_type(events, "scheduler.started")
+        assert len(started) == 0
 ```
 
-### 2.2. `add_ingestion_cycle_job()` — 🔴 MANDATORY FRAGMENT D CODE FIX (scheduler/service.py, B5 #1)
+**Monkeypatching strategy:** `ClayScheduler.add_health_tick_job` (class-level) — affects all instances. Класс-уровень лучше instance-уровня: (1) применяется ко всем future instances в тесте, (2) `monkeypatch` cleanup автоматически (откатывает на teardown).
+
+### 2.4. B6 cleanup — лишний `session.commit()` (scheduler/jobs.py:402-410)
 
 ```python
-def add_ingestion_cycle_job(self) -> None:
-    """Register the B5 ``IngestionCycleJob`` (flag-gated + 4-dep-checked)."""
-    if not self._settings.ingestion_enabled:
-        return
-    missing = [
-        name for name, value in (
-            ("ingestion_cycle_service", self._ingestion_cycle_service),
-            ("session_factory", self._session_factory),
-            ("audit_writer", self._audit_writer),
-            ("event_bus", self._event_bus),
-        ) if value is None
-    ]
-    if missing:
-        logger.warning(
-            "clay.scheduler: ingestion_enabled=True but %s is None — "
-            "ingestion-cycle job NOT registered (misconfiguration)",
-            " and ".join(missing),
-        )
-        return
-    job = IngestionCycleJob(
-        ingestion_service=self._ingestion_cycle_service,  # type: ignore[arg-type]
-        session_factory=self._session_factory,            # type: ignore[arg-type]
-        audit_writer=self._audit_writer,
-        event_bus=self._event_bus,
-    )
-    # 🔴 EMMA'S MANDATORY FRAGMENT D CODE FIX:
-    # registered callable = ``self._arun_safely`` (async wrapper,
-    # dispatches to event loop). The plan's fragment D contained
-    # a stale ``self._run_safely`` (sync wrapper) which would
-    # silently never await the coroutine — ingestion cycle
-    # would never run. Routing matrix + text plan say
-    # ``_arun_safely``; fragment D was the typo. Coding per
-    # matrix, not per fragment D.
-    self._apscheduler.add_job(
-        func=self._arun_safely,
-        trigger="interval",
-        seconds=self._settings.ingestion_cycle_interval_seconds,
-        id=self._INGESTION_CYCLE_JOB_ID,
-        # executor=None (default = AsyncIOScheduler's own loop)
-        # is the explicit B5 async-routing contract.
-        max_instances=1,
-        coalesce=True,
-        replace_existing=True,
-        args=[job.run],
-        kwargs={"on_error": job.on_error},
-    )
+        with self._session_factory() as session:
+            try:
+                summary = await self._service.run_once(session, emit=False)
+            except IngestionCycleBusy:
+                logger.info("clay.scheduler: ingestion cycle started mid-tick, skip")
+                return
+        # B6 cleanup: the prior ``session.commit()`` here was a
+        # harmless no-op — ``IngestionCycleService._do_run_once``
+        # already commits under its own ``asyncio.Lock``
+        # (ingestion/service.py:177). The outer session is left
+        # open until the ``with`` block exits; no explicit commit
+        # is needed here.
+        # B4 #11: a successful tick closes the failing episode so a
+        # later failure re-emits ``ingestion.cycle_failed``.
 ```
 
-### 2.3. `upsert_freshness_status` → bool (repositories_market.py, B5 Поправка 2)
+**Why this is dead code:** `run_once` (line 145-151) `await self._do_run_once(session)` (line 146) под `async with self._lock:` — `_do_run_once` (line 153-178) делает `session.commit()` (line 177) ВНУТРИ lock. После release (line 147), `run_once` возвращает `summary`. Повторный `session.commit()` — SQLAlchemy no-op (на уже-committed session). Dead code, убран для clarity.
 
-```python
-def upsert_freshness_status(
-    self,
-    *,
-    symbol: str,
-    timeframe: str,
-    freshness_state: str,
-    evaluated_at: datetime,
-    latest_bar_open_time: datetime | None,
-    is_stale: bool,
-) -> bool:
-    """Upsert a freshness row; return ``True`` iff a state transition occurred.
+## 3. Routing matrix (3 jobs) — финальная проверка на живом scheduler
 
-    Semantics:
-    * INSERT (no existing row) → True (first observation = transition).
-    * UPDATE with same state → False (timestamp-only touch, no transition).
-    * UPDATE with different state → True (real state change).
-    """
-    existing = self.session.scalar(
-        select(MarketFreshnessStatus).where(
-            MarketFreshnessStatus.symbol == symbol,
-            MarketFreshnessStatus.timeframe == timeframe,
-        ),
-    )
-    if existing is None:
-        self.session.add(
-            MarketFreshnessStatus(
-                symbol=symbol, timeframe=timeframe,
-                freshness_state=freshness_state, evaluated_at=evaluated_at,
-                latest_bar_open_time=latest_bar_open_time, is_stale=is_stale,
-            ),
-        )
-        self.session.flush()
-        return True
-
-    state_changed = existing.freshness_state != freshness_state
-    existing.freshness_state = freshness_state
-    existing.evaluated_at = evaluated_at
-    existing.latest_bar_open_time = latest_bar_open_time
-    existing.is_stale = is_stale
-    self.session.flush()
-    return state_changed
-```
-
-### 2.4. `IngestionCycleJob.run()` (scheduler/jobs.py, B4 pattern + B5 skip/race)
-
-```python
-async def run(self) -> None:
-    """Execute one ingestion-cycle tick. See class docstring."""
-    if self._service.is_running:
-        logger.info("clay.scheduler: ingestion cycle already running, skip tick")
-        return
-    with self._session_factory() as session:
-        try:
-            summary = await self._service.run_once(session, emit=False)
-        except IngestionCycleBusy:
-            # TOCTOU race: a second caller grabbed the service's
-            # lock between the ``is_running`` check and the
-            # ``run_once`` call. Log and skip — do not propagate
-            # to ``session-scheduler``.
-            logger.info("clay.scheduler: ingestion cycle started mid-tick, skip")
-            return
-        session.commit()
-    # B4 #11: a successful tick closes the failing episode so a
-    # later failure re-emits ``ingestion.cycle_failed``.
-    self._failing = False
-    new_state = (
-        bool(summary.incidents),
-        summary.freshness_state_transitions,
-    )
-    if self._cache is None:
-        # First run after process start — seed, do not emit.
-        self._cache = new_state
-        return
-    if new_state == self._cache:
-        # Steady state — Поправка 2 anti-flood correctness.
-        return
-    # Transition — emit through the public method.
-    self._service.emit_cycle_events(summary)
-    self._cache = new_state
-
-def on_error(self, exc: Exception) -> None:
-    """Isolated error policy — does NOT mutate session-scheduler."""
-    if not self._failing:
-        self._audit_writer.write(
-            "ingestion.cycle_failed", {"error": str(exc)},
-        )
-    self._failing = True
-    logger.exception(
-        "clay.scheduler: ingestion cycle failed; "
-        "session-scheduler NOT marked ERROR (isolated policy)",
-    )
-```
-
-## 3. Routing matrix (3 jobs) — подтверждение
-
-| Job | Wrapper registered with APScheduler | APScheduler sees | Runs in | Rationale |
+| Job | Wrapper | APScheduler sees | Runs in | Test |
 |---|---|---|---|---|
-| HealthTickJob (B3b) | `self._run_safely` (sync) | sync callable | ThreadPoolExecutor (`executor="default"`) | sync DB-I/O не блокирует loop (B0 §11.1) |
-| ReliabilityRecheckJob (B4) | `self._run_safely` (sync) | sync callable | ThreadPoolExecutor | sync DB-I/O не блокирует loop |
-| **IngestionCycleJob (B5)** | `self._arun_safely` (async) | coroutine function | event loop (default executor) | mirror `POST /ingestion/run` 1:1, sync-DB-on-loop = identical to route |
+| `health-tick` (B3b) | `ClayScheduler._run_safely` (sync) | sync callable | `ThreadPoolExecutor` (`executor="default"`) | ✅ `test_routing_matrix_sync_vs_async` (not `iscoroutinefunction`) |
+| `reliability-recheck` (B4) | `ClayScheduler._run_safely` (sync) | sync callable | `ThreadPoolExecutor` | ✅ (same) |
+| `ingestion-cycle` (B5) | `ClayScheduler._arun_safely` (async) | coroutine function | `AsyncIOScheduler` event loop (`executor=None`) | ✅ (`iscoroutinefunction`) |
 
-**Verification (test):** `tests/scheduler/test_clay_scheduler.py::test_ingestion_cycle_registered_when_enabled`:
-```python
-assert job.func.__qualname__ == scheduler._arun_safely.__qualname__
-assert job.func.__name__ == "_arun_safely"
-```
-
-**Why two wrappers, not one async `inspect.isawaitable`:** the registered callable's signature (`sync def` vs `async def`) determines APScheduler's routing, NOT what the wrapper calls internally. A single `async def` wrapper would silently move B3b/B4 sync-DB onto the event loop (regression). Two wrappers + shared error-helper = correct routing + no duplication.
+**Fragment D fix integration-level confirmation:** B5 plan v2 ratified `_arun_safely` для ingestion-cycle (sync wrapper бы silently не await'нул coroutine → ingestion cycle не исполняется). B6 test inspect'ит `job.func` на запущенном scheduler и подтверждает, что routing matrix в коде = routing matrix в B5 plan = `_run_safely` для sync jobs + `_arun_safely` для async job. **Не требуется future regression-тест** — этот тест уже pinned.
 
 ## 4. Acceptance verification
 
 ### 4.1. Pytest
+
 ```bash
 $ cd /home/emma/Projects/clay/backend && uv run pytest -q
-... 236 passed, 160 warnings in 6.62s
+249 passed, 849 warnings in 11.37s
 ```
-- Pre-B5: 216 passed. Post-B5: 236 passed (+20 net, +3 выше плана +17).
-- +5 (test_ingestion_cycle_service.py) + +10 (test_ingestion_cycle_job.py) + +1 (test_ingestion_route.py) + +4 (test_clay_scheduler.py additions) = +20 net.
-- `market_records_written` backward-compat: computed property `= inserted + updated`, все pre-B5 `assert ... == 4` тесты продолжают работать.
-- 0 регрессий во всех 15 доменах (alpha / ai_control / api / db / demo / health / ingestion / integration / ops / reliability / runtime / scheduler / session_control / validation_lab / workspace).
+
+- Pre-B6: 236 passed. Post-B6: 249 passed (+13 net).
+- +13 в `tests/integration/test_scheduler_lifespan.py` (1 new test file).
+- 0 regressions во всех 16 доменах (alpha / ai_control / api / db / demo / health / ingestion / integration / ops / reliability / runtime / scheduler / session_control / validation_lab / workspace + новый integration).
+- Runtime: 11.37s (B5: 8.01s; +3.36s за счёт real-tick smoke test #11 ждёт 2.5s + APScheduler startup/shutdown overhead × 13 тестов).
 
 ### 4.2. Pyright (full project)
+
 ```bash
 $ uvx --from pyright pyright
 189 errors, 0 warnings, 0 informations
 ```
-- B4.5 baseline: 184 errors. B5 baseline: 189 errors. **+5 new errors** — все в новых test-файлах, **pre-existing pattern** (`_FakeBinanceClient` not `BinanceSpotClient`, `_FakeSessionFactory` not `sessionmaker`, `dict[str, int]` not `dict[str, object]`). См. §Deviations.
 
-### 4.3. A6 invariant
+- B5 baseline: 189 errors. B6 baseline: 189 errors. **0 new errors.**
+- Pre-existing patterns: `_FakeSessionFactory` (B4), `_FakeBinanceClient` (B5), `dict[str, int]` payload (B4/B5), `repositories_market.py:45-51` (B5-pre), `ingestion/market/service.py:23` (B5-pre). Все pre-existing.
+- **Tracked in:** `chore(types)` burn-down backlog (deaddrop.md, separate session after Wave B).
+
+### 4.3. Routing matrix на живом scheduler
+
 ```bash
-$ grep -r "import clay.bootstrap\|from clay.bootstrap" /home/emma/Projects/clay/backend/src/clay/scheduler/
-(0 matches)
+$ uv run pytest tests/integration/test_scheduler_lifespan.py::test_routing_matrix_sync_vs_async -v
+tests/integration/test_scheduler_lifespan.py::test_routing_matrix_sync_vs_async[asyncio] PASSED
 ```
-- Scheduler layer по-прежнему явно DI-only, без `bootstrap` import. ✅
 
-### 4.4. Pyright на изменённых src-файлах
-- `repositories_market.py` — 6 pre-existing errors (были до B5: `float(bar[...])` from `object` — не B5-изменение).
-- `ingestion/market/service.py` — 1 pre-existing error.
-- `ingestion/service.py` — 0 new errors.
-- `scheduler/service.py` — 0 new errors (все pre-existing или унаследованные от B3a/B3b/B4).
-- `scheduler/jobs.py` — 0 new errors.
-- `api/routes/ingestion.py` — 0 new errors.
-- `api/lifespan.py` — 0 new errors.
-- `bootstrap.py` — 0 new errors.
-- `settings/scheduler.py` — 0 new errors.
-- `scheduler/__init__.py` — 0 new errors.
+✅ Confirmed: `health-tick.func` и `reliability-recheck.func` — sync (`not iscoroutinefunction`); `ingestion-cycle.func` — async (`iscoroutinefunction`). Routing matrix в коде = routing matrix в B5 plan.
 
-## 5. Architectural decisions (B5-specific)
+### 4.4. Confirm (a) на живом lifespan
 
-1. **🔴 MANDATORY FRAGMENT D CODE FIX (Emma's ratify, applied):** `add_ingestion_cycle_job()` registers `func=self._arun_safely` (NOT `self._run_safely`). Sync wrapper would call `job.run()` → return coroutine → never await → silent no-op, ingestion cycle never runs. Routing matrix + text plan say `_arun_safely`; fragment D had a typo. **Coding per matrix.**
-2. **Two wrappers + shared `_handle_job_error` (Поправка 1, applied):** sync `_run_safely` UNCHANGED (B3b/B4 → ThreadPoolExecutor); NEW async `_arun_safely` (B5 → event loop); shared `_handle_job_error` (B3b default / B4-on_error / B5-isolated в одном месте, no duplication).
-3. **Freshness transition signal (Поправка 2, applied):** `upsert_freshness_status → bool` (INSERT or state-change = True, timestamp-only = False). `IngestionRunSummary.freshness_state_transitions: int` field. Steady state = 0 → no emit. ~10-50 audit/день (vs 23k/день флуда при count-based).
-4. **Counter split (MED-C, applied):** `market_records_inserted` + `market_records_updated` (механическое разделение). `market_records_written` = computed property `= inserted + updated` для backward-compat с pre-B5 `assert ... == 4` тестами.
-5. **asyncio.Lock + is_running (TOCTOU mitigation):** lock покрывает **весь `_do_run_once`** (market + context + commit). `is_running` property = `lock.locked()` (fast non-blocking check). Manual route → 409, scheduler-job → skip+log.
-6. **`IngestionCycleBusy` exception:** raised когда lock held, caught в job (race) + route (→ 409). Job catches + logs (no re-raise, no `on_error` flip).
-7. **Emit-gating:** `run_once(session, *, emit: bool = True)`. `emit=False` (scheduler) skip ТОЛЬКО audit+event, DB writes mandatory. Public `emit_cycle_events(summary)` — single source of payload (manual route + job anti-flood transition).
-8. **Anti-flood signal = transition (NOT INSERT-based):** `(bool(incidents_present), freshness_state_transitions)` tuple. INSERT-based = флуд → НЕ primary signal. Steady = (0, 0) → no emit.
-9. **4 deps Q1 loud warning:** `ingestion_cycle_service` + `session_factory` + `audit_writer` + `event_bus`. Pattern mirrors B4 Q1 (2 deps), wider surface.
-10. **B4 #11 mandatory carry-forward:** `_failing` reset on success в `IngestionCycleJob.run()` step 3 (после `commit()`). `fail → success → fail` = 2 audit (Acceptance verified). Без reset — silent 2nd episode.
+```bash
+$ uv run pytest tests/integration/test_scheduler_lifespan.py::test_startup_failure_keeps_state_clean -v
+tests/integration/test_scheduler_lifespan.py::test_startup_failure_keeps_state_clean[asyncio] PASSED
+```
 
-## 6. Deviations от плана (поля/типы отличаются)
+✅ Confirmed: `scheduler.start()` runs BEFORE `app.state.scheduler = scheduler` (`lifespan.py:96-97`). При raise в `start()` → `app.state.scheduler is None` (от guard `lifespan.py:80`) + `scheduler.started` не в audit (raise на line 171, audit на line 184 — unreachable).
 
-**Net +20 tests, не +17** (план estimated +17):
-- +5 service tests (было 4 в плане, +1 для counter split явный test)
-- +10 job tests (было 8-9 в плане, +1 для race explicit + split fail-success-fail)
-- +1 route test (plan ✓)
-- +4 scheduler tests (plan ✓)
-- Итого +20, не +17. Дополнительные тесты — explicit isolation катков сценариев, не дубликаты.
+### 4.5. Confirm (b) через recon + code read
 
-**CLI-pyright +5 new errors, не 0:**
-- Все 5 в новых test-файлах (3 в `test_ingestion_cycle_job.py`, 1 в `test_ingestion_cycle_service.py`, 1 в `test_ingestion_route.py`).
-- Patterns pre-existing: `_FakeBinanceClient` (no `BinanceSpotClient` inheritance) — same as `test_ingestion_api.py:189` и других test-файлов. `_FakeSessionFactory` (no `sessionmaker` type) — same as `test_reliability_recheck_job.py:204,337` (B4 backlog). `dict[str, int]` payload — same as audit_writer tests.
-- **All match existing test-file patterns**; cleaned up in global `chore(types)` burn-down (separate slice per deaddrop backlog).
+✅ `services/registry.py:32-40`:
+```python
+def update_status(self, service_id, status, error=None) -> ServiceRecord:
+    record = self._services[service_id]
+    record.status = status
+    record.last_error = error
+    return record
+```
+**Нет `audit_writer.write` внутри.** Pure mutation. `bootstrap.py:148` `registry.update_status("control-api", HEALTHY)` — silent. `service.status_changed` audit пишется **только** call-sites: `ClayScheduler._handle_job_error` (per-tick exception), `HealthTickJob.run` (per-tick transition).
 
-**`test_ingestion_repositories.py` modified (1 line):**
-- `assert written == 1` → `assert written == (1, 0)`. Pre-B5 контракт на `int`; B5 — `tuple[int, int]` (counter split). Plan не упомянул явно эту правку, но она mechanical consequence от B5 (repositories_market.py change).
+## 5. Architectural decisions (B6-specific)
 
-**`market_records_written` semantics:**
-- Plan: computed property. Реализация: `@property` decorator на dataclass. Pre-B5 `assert summary.market_records_written == 4` тесты работают (computed). ✅
+1. **B6 = integration tests only, NOT ADR-007 file** (per Q11 in `to-architect-snapshot-2026-06-01.md:966` and Opus ratification 2026-06-03). Agent creates packet (`handoffs/b6-adr-007-packet-2026-06-03.md`); Opus writes `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` (architect's deliverable, per `docs/mission-control/adrs/adr-001..005` convention).
+2. **Isolation: `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps** (NOT pure `app_with_sqlite` conftest fixture, NOT production `app`). Rationale: `dependency_overrides` изолируют **только route-deps**; `lifespan` тянет scheduler-deps как **module-level imports** from `clay.bootstrap` — `monkeypatch` на module-level атрибуты — единственный способ.
+3. **13 тестов = Standard 9 + 4 точечных (apscheduler.state + routing matrix + real-tick smoke + 2 partial-failure)**. Routing matrix — бонус сверх плана (Standard+5 → 14 в плане, реализовано 13; один объединён с real-tick smoke).
+4. **Confirm (a) + (b) verified** before any code write. Recon (§1, §5) дал детали; B6 tests пинят invariants. Confirm (a) → startup-failure anti-test #12. Confirm (b) → recon §5 explicit statement + ADR-007 packet §1.1 open question.
+5. **B6 cleanup: redundant `session.commit()` removed** from `IngestionCycleJob.run()`. B5 unit test updated (`assert factory.sessions[0].committed is True` removed; docstring updated). This is the "minor cleanup" Emma mentioned in B6 task-packet §4.
+6. **Partial-failure modes pinned, NOT fixed.** Тесты #12 и #13 документируют **текущее** поведение (включая #13 minor reference-leak quirk). Fix candidate для ADR-007 (Opus решает).
+7. **B3a soft debt #10 (double-startup) pinned, NOT fixed.** `test_double_startup_does_not_crash` (B6 #10) фиксирует текущее поведение (duplicate `scheduler.started` audit) для future fix без regression.
+
+## 6. Deviations от плана
+
+**Net +13 тестов, не +12** (план estimated 12):
+- Standard 9: jobs registered, state walk, audit started, audit stopped, env-gate reliability, env-gate ingestion, app.state reset, double-startup, real-tick smoke = 9 ✅
+- Comprehensive 5: apscheduler.state, routing matrix, partial-failure startup, partial-failure shutdown = 4 (routing matrix объединён в Standard по §3 routing requirement, не "Comprehensive")
+- Итого: 9 + 4 = 13. Один тест из плана объединён (routing matrix — B5 fragment D confirm, ценен как integration-level pin).
+
+**Confirm (a) + (b) + asyncio.Lock + dead code cleanup — ВСЕ выполнены.**
+
+**CLI-pyright: 0 new errors** (план estimated 0).
 
 ## 7. Backlog (NOT done, NOT in this slice)
 
-- **B6 (integration tests + ADR-007)** — финальный slice Wave B. `LifespanManager` integration + архитектурная документация.
-- **DB-level `UniqueConstraint`** для `news_items` + `sentiment_snapshots` — defense-in-depth (закроется когда single-worker assumption снимется).
-- **Lifespan-owned `httpx.AsyncClient`** для `binance_client` (B4.5 v2 candidate) — кандидат на отдельный slice после B6.
-- **Sync-DB → `asyncio.to_thread`** если DB-работа превысит loop budget (B0 mitigation, eventual).
-- **`limit=200` wasteful fetch** в `_fetch_market_bars` (eventual: fetch только `bar_open_time > last_known`).
-- **`_next_sqlite_market_bar_id` race** (pre-existing, MED) — B5 asyncio.Lock снижает вероятность, не устраняет.
-- **`MarketRepository.upsert_market_bars` TOCTOU** (pre-existing, MED; asyncioLock снижает вероятность, не устраняет).
-- **`ops.*` retention/rotation** (deaddrop долг, ~43k rows/месяц).
-- **`chore(types)` burn-down** (184 → 184 pre-existing backlog + 5 B5 test-fake patterns = 189; одна правка для всех). Отдельный коммит после Wave B.
-- **Manual `POST /ingestion/run` counter split in `as_payload()`** — `market_records_inserted` + `market_records_updated` + computed `market_records_written` (уже сделано, см. §2).
-- **v2 candidate: explicit `ingestion.tick` event_bus publish** (reserved в B5 IngestionCycleJob.__init__).
+- **ADR-007 file** `docs/mission-control/adrs/adr-007-*.md` — Opus пишет из packet'а.
+- **ADR-006** (in-memory/runtime-state choices) — Opus' backlog, не блокирует B6.
+- **`chore(types)` burn-down** — 189 pyright errors (все pre-existing test-fake patterns). Отдельная сессия после Wave B.
+- **Full 12-commit logical split** (git history) — `git reset --soft bf87c2c~1` + N коммитов A1/A2/A2.5/A3/A4/A5/A5.5/A6/B0/B1/B2/B3a/B3b/B4/B4.5/B5. Отдельная git-сессия (Emma's call, B6 не блокирует).
+- **B3a soft debt #10 fix** (`start()` idempotency) — pinned by B6 #10, fix candidate.
+- **B6 #13 reference-leak fix** (wrap `shutdown` in `try/except` in lifespan's `finally:`) — ADR-007 candidate.
+- **Lifespan-owned `httpx.AsyncClient`** for `binance_client` (B4.5 v2) — separate slice.
+- **DB-level `UniqueConstraint`** for `news_items` + `sentiment_snapshots` — defense-in-depth, deferred until single-worker assumption lifted.
+- **`_next_sqlite_market_bar_id` race** + **`MarketRepository.upsert_market_bars` TOCTOU** — pre-existing MED, partially mitigated by B5 `asyncio.Lock`, full fix deferred.
 
 ## 8. Next step
 
-1. **B5 review** (Emma diff review, `git show bf87c2c`).
-2. **B6 task-packet** — `LifespanManager` integration tests + ADR-007 doc. Финальный slice Wave B.
-3. (опц.) `chore(types)` commit для 5 B5 test-fake + 184 pre-existing patterns — отдельный burn-down slice.
-4. После B6 → Wave B closed. → Wave C: planning (TBD).
+1. **Emma reviews B6 commit** `6af56a3` (или отклоняет — тогда чиню).
+2. **Opus пишет ADR-007** из `handoffs/b6-adr-007-packet-2026-06-03.md` → `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`.
+3. **Wave B formally closed** после ADR-007 landing.
+4. **Wave C planning** (TBD) — next engineering wave.
+
+---
+
+## Appendix: Commit hygiene (per Флаг 1)
+
+**Pre-B6 HEAD:** `eba64bb chore(wave-ab): commit remaining A1-B4 source + scheduler deps to make HEAD buildable` (throwaway, 65 files, +9835/-57).
+
+**B6 commit:** `6af56a3 test(scheduler): B6 integration tests + ADR-007 packet` (4 files, +856/-6).
+
+**Working tree:** clean. `git status` empty.
+
+**Branch state:** опережает `origin/main` на 3 коммита (`bf87c2c` + `eba64bb` + `6af56a3`). Push — Emma's call.
+
+**Future cleanup:** planned `git reset --soft bf87c2c~1` + N logical commits (12 по Emma's ratify). Out of scope for B6.

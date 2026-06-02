@@ -1,14 +1,14 @@
 ---
-date: 2026-06-02/03
+date: 2026-06-03
 from: architect
-status: ACTIVE — Wave B B3 + B4 + B4.5 + B5 done ✅, B6 (integration + ADR-007) pending — финальный slice
-slice: B3 done ✅ (B3a + B3b) → B4 done ✅ → B4.5 done ✅ → **B5 done ✅** (IngestionCycleJob, async on loop, asyncio.Lock, Поправка 1+2 applied, fragment D mandatory fix, commit `bf87c2c`) → **B6 pending** (LifespanManager integration tests + ADR-007 doc)
+status: ACTIVE — **Wave B CLOSED ✅ (9/9 slices, B0..B6 done)**. ADR-007 write pending on Opus (`docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`) from packet `handoffs/b6-adr-007-packet-2026-06-03.md`.
+slice: B0..B5 done ✅ → **B6 done ✅** (LifespanManager integration tests + ADR-007 packet extracted, commit `6af56a3`). **249 passed** (236 → 249, +13 net). 0 regressions. **Wave B fully closed code-wise**; ADR-007 landing = formal closure. Wave C planning TBD.
 source_of_truth: Architect Working Log (Notion, owned by Emma)
 ---
 
-# Active Task-packet: B3 + B4 + B4.5 + B5 closed · B6 (integration + ADR-007) pending
+# Active Task-packet: Wave B CLOSED ✅ — ADR-007 pending on Opus
 
-> B0 recon — accepted by Emma. B1 done ✅ · B2 done ✅ · B3 done ✅ (B3a + B3b) · B4 done ✅ · B4.5 done ✅ · **B5 done ✅** (`IngestionCycleJob` async coroutine registered via `func=self._arun_safely` — fragment D mandatory code fix applied, НЕ `_run_safely`; `IngestionCycleService` + `asyncio.Lock` + `is_running` + emit-gating; `upsert_freshness_status → bool` Поправка 2 anti-flood; counter split `market_records_inserted/updated` + computed `market_records_written`; manual route 409 на busy; commit `bf87c2c`). **236 passed** (216 → 236, +20 net). **0 регрессий.** **B6 pending** (финальный slice Wave B: `LifespanManager` integration tests + ADR-007 doc).
+> B0 recon — accepted by Emma. B1..B5 done ✅ (7 slices, 216 → 236 passed, commit `bf87c2c` + chore-commit `eba64bb`). **B6 done ✅** — 13 integration tests in `tests/integration/test_scheduler_lifespan.py` (3 jobs registered, state walk, audit events, env-gates, app.state reset, double-startup, real-tick smoke, 2 partial-failure anti-tests + routing matrix confirm на живом scheduler). Confirm (a) + (b) verified + pinned. **249 passed** (236 → 249, +13 net). **0 regressions.** CLI-pyright 189 = B5 baseline (0 new src-errors). Commit `6af56a3`. **Wave B fully closed code-wise.** **ADR-007 write pending on Opus** — packet ready: [handoffs/b6-adr-007-packet-2026-06-03.md](b6-adr-007-packet-2026-06-03.md) (~30KB, 12 sections). **Agent does NOT write the ADR file** (architect's deliverable per `docs/mission-control/adrs/adr-001..005` convention).
 
 ## B3 + B4 + B4.5 closure summary
 
