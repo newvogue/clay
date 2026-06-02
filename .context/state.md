@@ -1,13 +1,13 @@
 # Текущее Состояние
 
 **Дата:** 2026-06-03
-**Где остановились:** Wave A (persistence) — все 10 слайсов done ✅. **Wave B (scheduler & lifespan) — ВСЕ 9 слайсов done ✅ (CLOSED)**: B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + B6. `pytest -q` → **249 passed** (236 → 249, +13 net, B6 integration tests). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors). Branch ahead of `origin/main` на 3 коммита (`bf87c2c` + `eba64bb` + `6af56a3`).
-**Следующий шаг:** **Opus пишет ADR-007** из `handoffs/b6-adr-007-packet-2026-06-03.md`. После ADR-007 landing → **Wave B formally closed** → Wave C planning (TBD).
-**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **B6 done ✅** (commit `6af56a3`, 13 integration tests). Packet для архитектора: [handoffs/b6-adr-007-packet-2026-06-03.md](handoffs/b6-adr-007-packet-2026-06-03.md) (Opus пишет `docs/mission-control/adrs/adr-007-*.md` отсюда).
+**Где остановились:** Wave A (persistence) — все 10 слайсов done ✅. **Wave B (scheduler & lifespan) — FORMALLY CLOSED ✅** (9/9 slices: B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + B6) + **ADR-007 accepted** (commit `f0cbb7d`, 192 LOC). `pytest -q` → **249 passed** (236 → 249, +13 net, 0 regressions). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors). Branch ahead of `origin/main` на 5 коммитов (`bf87c2c` + `eba64bb` + `6af56a3` + `c3a6484` + `f0cbb7d`).
+**Следующий шаг:** **Wave C planning (TBD)** от архитектора. Push (5 локальных коммитов) — Emma's call.
+**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **Wave B formally closed ✅** (B0..B6 + ADR-007).
 
 ## 🛑 Точка остановки (session handoff)
 
-**Сессия 2026-06-03.** **Wave B CLOSED ✅ (9/9 слайсов):** B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + **B6 done ✅** (финальный slice, 13 integration tests, commit `6af56a3`). **249 passed** (236 → 249, +13 net, 0 regressions, 11.37s). CLI-pyright 189 = B5 baseline (0 new src-errors).
+**Сессия 2026-06-03.** **Wave B FORMALLY CLOSED ✅:** 9/9 slices (B0..B6, 249 passed, 0 regressions) + **ADR-007 accepted** (`f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`). Документ закрепляет lifecycle-инварианты (start/stop), env-gate surface, sync/async routing matrix, **audit topology (Ruling 1, refined by confirm (b))** — `registry.update_status` = pure mutation, `status_changed` пишется только call-sites'ами, control-api bootstrap transition — silent. **Partial-failure stance (Ruling 2):** startup-fail = fail-fast, shutdown-fail = documented known-limit (test #13 pins).
 
 **B6 highlights:**
 - **13 integration тестов** в `backend/tests/integration/test_scheduler_lifespan.py` (NEW, 461 LOC). Изоляция: `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps. Покрывают: 3 jobs registered, session-scheduler state walk, APScheduler STATE_RUNNING, **routing matrix (sync `_run_safely` vs async `_arun_safely` — B5 fragment D fix integration-level confirmation)**, audit events scheduler.started/stopped, env-gates (RELIABILITY_ENABLED, INGESTION_ENABLED), app.state reset, B3a soft-debt double-startup pin, real-tick smoke, 2 partial-failure anti-tests (startup-fail, shutdown-fail).
@@ -19,29 +19,24 @@
 - **Commit hygiene Флаг 1 closed:** HEAD `eba64bb` (chore-commit "throwaway" для make HEAD buildable, ratified Emma 2026-06-03). Future full 12-split вынесен в отдельную git-сессию (B6 не блокирует).
 
 **Возобновление:**
-  1. **Emma** ревью B6 commit `6af56a3` (или отклоняет — тогда чиню)
-  2. **Opus (архитектор)** пишет `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` из `handoffs/b6-adr-007-packet-2026-06-03.md` → **Wave B formally closed**
-  3. **Отдельная git-сессия** для `git reset --soft bf87c2c~1` + N logical commits (12 по Emma's ratify). Out of B6 scope.
-  4. **Отдельная `chore(types)` сессия** для 189 pyright errors (pre-existing test-fake type-debt). Out of B6 scope.
-  5. **Wave C planning** (TBD) — next engineering wave.
+  1. **Push** 5 локальных коммитов (`bf87c2c` + `eba64bb` + `6af56a3` + `c3a6484` + `f0cbb7d`) в `origin/main` — Emma's call.
+  2. **Отдельная git-сессия** для `git reset --soft bf87c2c~1` + N logical commits (12 по Emma's ratify). Out of Wave B scope.
+  3. **Отдельная `chore(types)` сессия** для 189 pyright errors (pre-existing test-fake type-debt). Out of Wave B scope.
+  4. **Wave C planning** (TBD) — next engineering wave от архитектора.
 
 ## Что сделано за последнюю сессию
 - 2026-06-01: развёрнута vendor-agnostic система памяти `.context/` в проекте Clay
 - 2026-06-01: **Wave A / persistence (10 слайсов done ✅)** (A0→A5.5+A6, pytest 188)
 - 2026-06-02: **Wave B / scheduler & lifespan — B0 + B1 + B2 + B3 + B4 + B4.5 + B5 done ✅** (7/8 слайсов, 236 passed, commit `bf87c2c`)
-- 2026-06-03: **Wave B CLOSED ✅ — B6 done ✅** (финальный slice, 9/9, 249 passed, commit `6af56a3`)
-  1. **B6 pre-flight recon** (через `explore` subagent) — side-effect map, audit ordering, partial-failure matrix, env-gate surface, ADR-007 location question. **Обнаружена дыра:** `pyproject.toml` (B1) не закоммичен в `bf87c2c` → HEAD не билдится. **Также recon over-reported:** `registry.update_status` (services/registry.py:32-40) — pure mutation, БЕЗ audit, вопреки первоначальной гипотезе. Поправлено в §5 recon.
-  2. **Commit hygiene Флаг 1 (Emma's call):** `git add -A && commit "chore(wave-ab): commit remaining A1-B4 source + scheduler deps to make HEAD buildable"` (commit `eba64bb`, 65 files, +9835/-57, throwaway). HEAD стал собираемым (`git status` clean + `uv sync` 42 pkg + 236 passed + import OK). Full 12-split вынесен в отдельную git-сессию.
-  3. **B6 code-фаза:**
-     - **13 integration тестов** в `backend/tests/integration/test_scheduler_lifespan.py` (NEW, 461 LOC, 11.37s full suite). Standard 9 + 4 точечных (apscheduler.state, routing matrix, real-tick smoke, 2 partial-failure). Изоляция: `build_services_for_integration(tmp_path)` + monkeypatch `lifespan_module` deps (8 scheduler-deps + `scheduler_settings`).
-     - **Confirm (a) verified + pinned:** `scheduler.start()` ДО `app.state.scheduler = scheduler` (lifespan.py:96-97). Тест #12 injects fail в `add_health_tick_job` → re-raise + `app.state.scheduler is None` + audit empty.
-     - **Confirm (b) verified:** `registry.update_status` — pure mutation. `service.status_changed` пишется ТОЛЬКО call-sites. `bootstrap.py:148` `control-api` transition — silent (open question для ADR-007).
-     - **B6 cleanup:** redundant `session.commit()` в `IngestionCycleJob.run()` удалён (dead code — `_do_run_once` уже коммитит под `asyncio.Lock`). B5 unit test обновлён.
-     - **asyncio.Lock verify:** `run_once` (ingestion/service.py:145-146) оборачивает `await self._do_run_once(session)` в `async with self._lock:` — весь body (market + context + commit) под lock. ✅
-     - **Routing matrix на живом scheduler:** `inspect.iscoroutinefunction` подтверждает — sync jobs → sync wrapper, ingestion-cycle → async wrapper. B5 fragment D fix = ✅ integration-level.
-     - **+13 net tests.** 236 → 249. **0 regressions.** CLI-pyright 189 = B5 baseline (0 new src-errors).
-  4. **ADR-007 packet extracted:** `.context/handoffs/b6-adr-007-packet-2026-06-03.md` (~30KB, 12 sections: TL;DR + lifespan contract + audit chokepoint + env-gate surface + job registration matrix + side-effect-free precondition + partial-failure matrix + single-worker + lifespan side-effect boundary + B6 test index + 5 open questions + B6 commit scope). **Агент НЕ пишет** `docs/mission-control/adrs/adr-007-*.md` (deliverable Opus, per `docs/mission-control/adrs/adr-001..005` convention).
-  5. **B6 commit:** `6af56a3 test(scheduler): B6 integration tests + ADR-007 packet` (4 files, +856/-6). Working tree clean. Branch ahead of origin/main на 3 коммита.
+- 2026-06-03: **B6 done ✅** (финальный slice, 13 integration тестов, confirm (a)/(b) verified, commit `6af56a3`, +13 net, 0 regressions)
+- 2026-06-03: **Wave B FORMALLY CLOSED ✅** — Emma review B6 принят + **ADR-007 accepted** (commit `f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`)
+  - **Emma ratify B6:** все критерии зелёные, оба confirm разрешены, routing подтверждён на живом scheduler. Зафиксировано в её логе.
+  - **ADR-007 ключевое:**
+    - **Ruling 1 (audit topology, refined by confirm (b)):** lifecycle-глаголы (scheduler.started/stopped) vs `service.status_changed` — разные классы, не гармонизируются. `registry.update_status` = pure mutation. `status_changed` пишется ТОЛЬКО call-sites'ами (`_handle_job_error`, `HealthTickJob.run`). control-api `STOPPED→HEALTHY` на bootstrap — **silent** (orchestrated, не наблюдаемый health-transition).
+    - **Ruling 2 (partial-failure stance):** startup-fail = fail-fast (test #12 pins). shutdown-fail = documented known-limit (test #13 pins). double-startup = pinned soft-debt.
+    - **Routing matrix (B5 fragment D fix пин'нут integration-level):** `inspect.iscoroutinefunction` подтверждает sync jobs → `_run_safely` → ThreadPoolExecutor, ingestion-cycle → `_arun_safely` → event loop.
+    - **Single-worker assumption** зафиксирована явно.
+  - **Backlog (6 items):** shutdown-fail hardening, UniqueConstraint idempotency, lifespan-owned httpx.AsyncClient, asyncio.to_thread для sync-DB, ops.* retention, chore(types) burn-down.
 
 ### B4 highlights (финальный slice сессии)
 

@@ -1,3 +1,17 @@
+# Report: ADR-007 landing → Wave B FORMALLY CLOSED
+
+> **Wave B formally closed ✅** — B0..B6 (9/9 slices, 249 passed, 0 regressions) + **ADR-007 accepted** (`f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`).
+>
+> **Emma ratify B6:** все критерии зелёные, оба confirm разрешены, routing подтверждён на живом scheduler. Зафиксировано в логе (status-callout, journal-строка, decomposition, decisions-bullet с обоими confirm).
+>
+> **ADR-007 Ruling 1 (audit topology, refined by confirm (b)):** `registry.update_status` = pure mutation. `status_changed` пишется ТОЛЬКО call-sites. control-api `STOPPED→HEALTHY` на bootstrap = **silent** (orchestrated, не наблюдаемый health-transition). Это усиливает Ruling 1 — orchestrated lifecycle НЕ аудитится через `status_changed`.
+>
+> **Deviations accepted:** +13 (не +12, routing-matrix влит в Standard), 2 коммита вместо 1 (test-code/.context split, всё равно съест future `reset --soft`). #13 reference-leak → backlog/ADR-candidate.
+>
+> **Next:** Wave C planning (TBD) от архитектора. Push (5 локальных коммитов) — Emma's call.
+
+---
+
 # Report: B6 (Wave B finale — integration tests + ADR-007 packet)
 
 > **Сессия 2026-06-03.** Wave B CLOSED ✅ (B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + **B6** = 9/9 slices). **249 passed** (236 → 249, +13 net, 0 regressions, 11.37s). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors; pre-existing test-fake type-debt in B4/B5 unit tests is in `chore(types)` burn-down backlog).

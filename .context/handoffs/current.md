@@ -1,14 +1,14 @@
 ---
 date: 2026-06-03
 from: architect
-status: ACTIVE — **Wave B CLOSED ✅ (9/9 slices, B0..B6 done)**. ADR-007 write pending on Opus (`docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`) from packet `handoffs/b6-adr-007-packet-2026-06-03.md`.
-slice: B0..B5 done ✅ → **B6 done ✅** (LifespanManager integration tests + ADR-007 packet extracted, commit `6af56a3`). **249 passed** (236 → 249, +13 net). 0 regressions. **Wave B fully closed code-wise**; ADR-007 landing = formal closure. Wave C planning TBD.
+status: ACTIVE — **Wave B FORMALLY CLOSED ✅** (9/9 slices B0..B6 + **ADR-007 accepted** commit `f0cbb7d`). 249 passed, 0 regressions. **Wave C planning (TBD)**.
+slice: B0..B6 done ✅ + ADR-007 accepted. Source-of-truth: `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` (192 LOC). Push (5 коммитов) — Emma's call.
 source_of_truth: Architect Working Log (Notion, owned by Emma)
 ---
 
-# Active Task-packet: Wave B CLOSED ✅ — ADR-007 pending on Opus
+# Active Task-packet: Wave B FORMALLY CLOSED ✅ — Wave C planning pending
 
-> B0 recon — accepted by Emma. B1..B5 done ✅ (7 slices, 216 → 236 passed, commit `bf87c2c` + chore-commit `eba64bb`). **B6 done ✅** — 13 integration tests in `tests/integration/test_scheduler_lifespan.py` (3 jobs registered, state walk, audit events, env-gates, app.state reset, double-startup, real-tick smoke, 2 partial-failure anti-tests + routing matrix confirm на живом scheduler). Confirm (a) + (b) verified + pinned. **249 passed** (236 → 249, +13 net). **0 regressions.** CLI-pyright 189 = B5 baseline (0 new src-errors). Commit `6af56a3`. **Wave B fully closed code-wise.** **ADR-007 write pending on Opus** — packet ready: [handoffs/b6-adr-007-packet-2026-06-03.md](b6-adr-007-packet-2026-06-03.md) (~30KB, 12 sections). **Agent does NOT write the ADR file** (architect's deliverable per `docs/mission-control/adrs/adr-001..005` convention).
+> **B0..B6 done ✅ (9/9 slices, 249 passed, 0 regressions).** **ADR-007 accepted** (commit `f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`). **Wave B formally closed.** Ждём Wave C planning от архитектора.
 
 ## B3 + B4 + B4.5 closure summary
 
