@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, String, Text
+from sqlalchemy import DateTime, Float, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from clay.db.base import Base
@@ -8,7 +8,15 @@ from clay.db.base import Base
 
 class NewsItem(Base):
     __tablename__ = "news_items"
-    __table_args__ = {"schema": "context"}
+    __table_args__ = (
+        UniqueConstraint(
+            "source_name",
+            "headline",
+            "published_at",
+            name="uq_news_items_dedup",
+        ),
+        {"schema": "context"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_name: Mapped[str] = mapped_column(String(64), index=True)
@@ -21,7 +29,15 @@ class NewsItem(Base):
 
 class SentimentSnapshot(Base):
     __tablename__ = "sentiment_snapshots"
-    __table_args__ = {"schema": "context"}
+    __table_args__ = (
+        UniqueConstraint(
+            "source_name",
+            "symbol",
+            "captured_at",
+            name="uq_sentiment_snapshots_dedup",
+        ),
+        {"schema": "context"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_name: Mapped[str] = mapped_column(String(64), index=True)
