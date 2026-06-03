@@ -1,3 +1,28 @@
+# Report: C2 — Lifespan-owned `httpx.AsyncClient` (HIGH-2 + MED-3)
+
+> **Сессия 2026-06-03. C2 code done ✅** — Wave C #2 (pre-D hardening). **261 passed** (255 → 261, +6 net, 0 regressions, 10.96s). 0 new pyright (189 baseline).
+>
+> **C2 закрывает HIGH-2** (5 760 AsyncClient/day per-call hot loop) + **MED-3** (noisy shutdown). Один lifespan-owned `httpx.AsyncClient(limits=Limits(max_connections=20, max_keepalive_connections=10))`, создан в startup ДО `scheduler.start()`, инжектнут в `MarketIngestionService` singleton через `set_http_client()`. `aclose()` строго ПОСЛЕ `scheduler.shutdown(wait=True)` (MED-3 drain guarantee). `http_client = None` ДО try (boot-safety guard, Emma's 🔴 fix).
+>
+> **3 коммита впереди origin:** `53b649f` C1 + `f10636e` C2 + `4fe3f7f` .context. **Next:** C3 (asyncio.to_thread) или C4 (retention) — pending Emma ratify C2.
+
+**C2 key changes:**
+- `lifespan.py:80-119` — `http_client = None` ДО try (boot-safety), `AsyncClient(timeout=10.0, limits=Limits(20, 10))`, `set_http_client` ДО `scheduler.start()`, `aclose()` ПОСЛЕ shutdown
+- `binance_client.py:20-31` — `set_http_client(client | None)` late-binding setter (else-ветка сохранена как fallback, B4.5 contract pin)
+- `market/service.py:16-27` — passthrough (реальный путь инжекта, не helper — rationale corrected per Emma 🟢)
+- `test_scheduler_lifespan.py:462-506` — `is_closed` pin (deterministic per Emma 🟡 recommendation)
+- `_market_ingestion_service` добавлен в `isolated_app` fixture (8 → 9 deps)
+- 9 тестов (3 unit + 5 api-lifespan + 1 integration), все зелёные
+
+**C2 acceptance:**
+- `test_lifespan_injects_http_client_before_scheduler_start` — order assert ✅
+- `test_lifespan_aclose_after_scheduler_shutdown` — order assert ✅
+- `test_lifespan_initializes_http_client_none_before_try` — UnboundLocalError guard ✅
+- `test_http_client_is_open_during_lifespan_and_closed_after` — is_closed pin ✅
+- `test_fetch_klines_creates_async_client_per_call_when_none_injected` — B4.5 fallback ✅
+
+---
+
 # Report: ADR-007 landing → Wave B FORMALLY CLOSED
 
 > **Wave B formally closed ✅** — B0..B6 (9/9 slices, 249 passed, 0 regressions) + **ADR-007 accepted** (`f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`).
