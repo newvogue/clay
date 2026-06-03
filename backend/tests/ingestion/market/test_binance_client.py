@@ -44,3 +44,80 @@ async def test_fetch_klines_returns_parsed_payload() -> None:
         result = await client.fetch_klines(symbol="BTCUSDT", interval="5m", limit=1)
 
     assert result == [expected_kline]
+
+
+@pytest.mark.anyio
+async def test_fetch_klines_creates_async_client_per_call_when_none_injected() -> None:
+    """C2: else-branch fallback contract (B4.5) — when no client is injected
+    via constructor or ``set_http_client``, ``fetch_klines`` builds a new
+    ``httpx.AsyncClient`` per call. Pinned for unit-test / script paths
+    that bypass the lifespan-owned client.
+    """
+    expected_kline = [
+        1711954800000,
+        "70100.00",
+        "70200.00",
+        "70050.50",
+        "70180.20",
+        "200.00",
+        1711955699999,
+        "14000000.00",
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v3/klines"
+        return httpx.Response(200, json=[expected_kline])
+
+    # No client=... in constructor, no set_http_client call → else-branch.
+    client = BinanceSpotClient(base_url="https://test.invalid")
+
+    # Inject the MockTransport indirectly by patching the AsyncClient
+    # class used inside the else-branch.
+    import clay.ingestion.market.binance_client as binance_module
+    original_async_client = binance_module.httpx.AsyncClient
+
+    class _PatchedAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self._client = original_async_client(
+                transport=httpx.MockTransport(handler), *args, **kwargs
+            )
+
+        async def __aenter__(self):
+            return self._client
+
+        async def __aexit__(self, *args):
+            return await self._client.__aexit__(*args)
+
+    binance_module.httpx.AsyncClient = _PatchedAsyncClient  # type: ignore[assignment]
+    try:
+        result = await client.fetch_klines(symbol="BTCUSDT", interval="5m", limit=1)
+    finally:
+        binance_module.httpx.AsyncClient = original_async_client  # type: ignore[assignment]
+
+    assert result == [expected_kline]
+    # And: client._client remains None (injection did not happen).
+    assert client._client is None
+
+
+@pytest.mark.anyio
+async def test_set_http_client_replaces_injected_client() -> None:
+    """C2: late-binding setter swaps the underlying client.
+
+    Production uses this to install the lifespan-owned client after
+    import time. The setter must overwrite, not merge — a stale
+    reference would keep the per-call else-branch on the hot path.
+    """
+    async with httpx.AsyncClient() as first_client:
+        client = BinanceSpotClient(client=first_client)
+        assert client._client is first_client
+
+        second_client = httpx.AsyncClient()
+        try:
+            client.set_http_client(second_client)
+            assert client._client is second_client
+        finally:
+            await second_client.aclose()
+
+        # Setter accepts None to clear (useful for reset between tests).
+        client.set_http_client(None)
+        assert client._client is None

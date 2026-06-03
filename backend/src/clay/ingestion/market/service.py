@@ -1,6 +1,8 @@
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+import httpx
+
 from clay.db.repositories_market import MarketRepository
 from clay.ingestion.market.binance_client import BinanceSpotClient
 from clay.ingestion.market.models import NormalizedMarketBar
@@ -12,6 +14,21 @@ class MarketIngestionService:
 
     def __init__(self, client: BinanceSpotClient) -> None:
         self.client = client
+
+    def set_http_client(self, client: httpx.AsyncClient | None) -> None:
+        """Late-binding pass-through to the underlying ``BinanceSpotClient``.
+
+        C2 (Wave C pre-D hardening): this is the **real** inject path,
+        not an optional helper. ``api/lifespan.py`` startup calls
+        ``market_ingestion_service.set_http_client(http_client)`` to
+        install the shared lifespan-owned client on the import-time
+        singleton. ``ingestion_cycle_service`` (and therefore the
+        scheduler-job and the ``POST /ingestion/run`` route) reach the
+        same client through this single ``MarketIngestionService`` →
+        ``BinanceSpotClient`` chain — no ``app.state.httpx_client``
+        needed.
+        """
+        self.client.set_http_client(client)
 
     async def fetch_and_normalize(
         self,

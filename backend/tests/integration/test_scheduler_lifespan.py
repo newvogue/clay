@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from apscheduler.schedulers.base import STATE_RUNNING
 from asgi_lifespan import LifespanManager
@@ -84,6 +85,7 @@ def isolated_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr(lifespan_module, "_event_bus", services["event_bus"])
     monkeypatch.setattr(lifespan_module, "_health_monitor", services["health_monitor"])
     monkeypatch.setattr(lifespan_module, "_ingestion_cycle_service", services["ingestion_cycle_service"])
+    monkeypatch.setattr(lifespan_module, "_market_ingestion_service", services["market_ingestion_service"])
     monkeypatch.setattr(lifespan_module, "_registry", services["registry"])
     monkeypatch.setattr(lifespan_module, "_reliability_service", services["reliability_service"])
     monkeypatch.setattr(lifespan_module, "_session_factory", services["session_factory"])
@@ -452,3 +454,38 @@ async def test_shutdown_failure_pins_state(
     assert len(stopped) == 0, (
         f"expected no scheduler.stopped audit on shutdown failure, got {stopped}"
     )
+
+
+# --- C2: lifespan-owned httpx.AsyncClient lifecycle (HIGH-2 + MED-3) ---
+
+
+@pytest.mark.anyio
+async def test_http_client_is_open_during_lifespan_and_closed_after(
+    isolated_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C2: the shared ``httpx.AsyncClient`` injected in lifespan is open
+    while the app is running and closed after ``LifespanManager`` exits.
+
+    Per Emma's mandatory fix (🟡): pin via ``is_closed`` (deterministic)
+    rather than relying on noisy mid-tick assertions. The isolated
+    ``market_ingestion_service`` from the fixture is the same object the
+    lifespan injects the client into (via
+    ``_market_ingestion_service.set_http_client(http_client)``), so
+    we read the state directly from the singleton without extra wiring.
+    """
+    app, services = isolated_app
+    market_service = services["market_ingestion_service"]
+
+    # The fixture has already rebound lifespan_module._market_ingestion_service
+    # to the isolated service — so lifespan calls set_http_client on it.
+    # Before startup: no client injected.
+    assert market_service.client._client is None, "client should not be set before startup"
+
+    async with LifespanManager(app):
+        # Inside lifespan: client is open and reachable through the singleton.
+        assert market_service.client._client is not None, "set_http_client never called"
+        assert market_service.client._client.is_closed is False, "client should be open during lifespan"
+
+    # After lifespan exit: client is closed (MED-3 — closed strictly after
+    # scheduler.shutdown(wait=True) return, so no in-flight job races).
+    assert market_service.client._client.is_closed is True, "client must be closed after shutdown"

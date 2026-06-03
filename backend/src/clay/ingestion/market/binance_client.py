@@ -17,6 +17,19 @@ class BinanceSpotClient:
         self.timeout = timeout
         self._client = client
 
+    def set_http_client(self, client: httpx.AsyncClient | None) -> None:
+        """Late-binding setter for the shared lifespan-owned client.
+
+        C2 (Wave C pre-D hardening): production wires one shared
+        ``httpx.AsyncClient`` from the FastAPI lifespan
+        (``api/lifespan.py`` startup) and injects it into the
+        import-time ``BinanceSpotClient`` singleton via this method.
+        Unit tests / scripts can still construct ``BinanceSpotClient()``
+        with no injected client and rely on the per-call else-branch
+        below for fallback (B4.5 contract pin).
+        """
+        self._client = client
+
     async def fetch_klines(
         self,
         symbol: str,

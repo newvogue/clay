@@ -51,12 +51,14 @@ from datetime import UTC, datetime
 import logging
 
 from fastapi import FastAPI
+import httpx
 
 from clay.bootstrap import (
     audit_writer as _audit_writer,
     event_bus as _event_bus,
     health_monitor as _health_monitor,
     ingestion_cycle_service as _ingestion_cycle_service,
+    market_ingestion_service as _market_ingestion_service,
     registry as _registry,
     reliability_service as _reliability_service,
     scheduler_settings,
@@ -76,12 +78,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     shutdown. The startup body must remain side-effect-free besides
     the ``app.state`` stamps, the log lines, and the scheduler
     lifecycle call.
+
+    C2 (Wave C pre-D hardening): creates a single shared
+    ``httpx.AsyncClient`` in startup and injects it into the
+    import-time ``MarketIngestionService`` singleton (which
+    ``IngestionCycleService``, ``IngestionCycleJob`` and
+    ``POST /ingestion/run`` all reach through one DI chain). Closes
+    the client in shutdown **after** ``scheduler.shutdown(wait=True)``
+    to keep in-flight jobs from racing the close (MED-3). The
+    client is bound to the running event loop — never created at
+    import time.
     """
     app.state.scheduler = None
     app.state.started_at = None
+    http_client: httpx.AsyncClient | None = None
     logger.info("clay.api.lifespan: startup")
     try:
         app.state.started_at = datetime.now(UTC)
+        # C2: shared AsyncClient created BEFORE scheduler.start() so jobs
+        # see it from their very first tick. Created on the running loop
+        # (lifespan runs inside uvicorn's event loop), not at import time.
+        http_client = httpx.AsyncClient(
+            timeout=10.0,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+            ),
+        )
+        _market_ingestion_service.set_http_client(http_client)
         if scheduler_settings.enabled:
             scheduler = ClayScheduler(
                 settings=scheduler_settings,
@@ -106,6 +130,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown(wait=True)
+        # C2 MED-3: aclose() strictly AFTER scheduler shutdown so in-flight
+        # job ticks do not race the close. Guard for the boot-safety case
+        # where startup raised before the AsyncClient ctor completed.
+        if http_client is not None:
+            try:
+                await http_client.aclose()
+            except Exception:
+                logger.exception(
+                    "clay.api.lifespan: http_client.aclose failed (known-limit)"
+                )
         logger.info("clay.api.lifespan: shutdown")
         app.state.scheduler = None
         app.state.started_at = None
