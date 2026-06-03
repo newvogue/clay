@@ -1,9 +1,9 @@
 # Текущее Состояние
 
 **Дата:** 2026-06-03
-**Где остановились:** Wave A (persistence) — все 10 слайсов done ✅. **Wave B (scheduler & lifespan) — FORMALLY CLOSED ✅** (9/9 slices: B0 + B1 + B2 + B3a + B3b + B4 + B4.5 + B5 + B6) + **ADR-007 accepted** (commit `f0cbb7d`, 192 LOC). `pytest -q` → **249 passed** (236 → 249, +13 net, 0 regressions). CLI-pyright: 189 errors (same as B5 baseline, 0 new src-errors). Branch ahead of `origin/main` на 5 коммитов (`bf87c2c` + `eba64bb` + `6af56a3` + `c3a6484` + `f0cbb7d`).
-**Следующий шаг:** **Wave C planning (TBD)** от архитектора. Push (5 локальных коммитов) — Emma's call.
-**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **Wave B formally closed ✅** (B0..B6 + ADR-007).
+**Где остановились:** Wave A ✅. Wave B ✅. **Wave C (hardening) — C1 ✅ C2 ✅.** C3 (asyncio.to_thread) или C4 (ops retention) — следующий, по твоей ratify. `pytest -q` → **261 passed** (255 + 6 C2, 0 regressions). **Branch:** 2 коммита ahead of origin (`53b649f` C1 + `f10636e` C2).
+**Следующий шаг:** **C3 (asyncio.to_thread)** ждёт ratify C2 + твоего погнали.
+**Активный task-packet:** [handoffs/current.md](handoffs/current.md) = **C2 code done ✅** (pending Emma ratify).
 
 ## 🛑 Точка остановки (session handoff)
 

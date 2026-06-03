@@ -1,14 +1,23 @@
 ---
 date: 2026-06-03
 from: architect
-status: ACTIVE — **Wave B FORMALLY CLOSED ✅** (9/9 slices B0..B6 + **ADR-007 accepted** commit `f0cbb7d`). 249 passed, 0 regressions. **Wave C planning (TBD)**.
-slice: B0..B6 done ✅ + ADR-007 accepted. Source-of-truth: `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md` (192 LOC). Push (5 коммитов) — Emma's call.
+status: ACTIVE — **Wave C: C1 ✅ C2 ✅ (code done)**. C3 (asyncio.to_thread) next — pending Emma ratify of C2 + погнали.
+slice: **C2 — lifespan-owned httpx.AsyncClient (HIGH-2 + MED-3)**. Code done: commit `f10636e`. 6 source+test changed, 296 LOC net. pytest 261 (+6 net, 0 regress). Pyright 189 (0 new).
 source_of_truth: Architect Working Log (Notion, owned by Emma)
 ---
 
-# Active Task-packet: Wave B FORMALLY CLOSED ✅ — Wave C planning pending
+# Active Task-packet: Wave C (hardening) — C2 code done ✅
 
-> **B0..B6 done ✅ (9/9 slices, 249 passed, 0 regressions).** **ADR-007 accepted** (commit `f0cbb7d`, 192 LOC, `docs/mission-control/adrs/adr-007-scheduler-side-effect-and-lifecycle-contract.md`). **Wave B formally closed.** Ждём Wave C planning от архитектора.
+> **Wave B formally closed ✅ (push done). Wave C:**
+> - ✅ **C1 — DB UniqueConstraint** (idempotency / HIGH-1) — commit `53b649f`, 255→249
+> - ✅ **C2 — lifespan-owned httpx.AsyncClient** (HIGH-2 + MED-3) — commit `f10636e`, 261→255 (0 regress)
+> - ⏳ **C3 — asyncio.to_thread для sync-DB** (MED-4) — waiting on next slice
+> - ⏳ **C4 — ops.* retention** (severable tail)
+>
+> C2: один lifespan-owned httpx.AsyncClient с explicit Limits(max_connections=20,
+> keepalive=10), создаётся ДО scheduler.start(), late-binding setter на
+> MarketIngestionService singleton, aclose() строго ПОСЛЕ scheduler.shutdown(wait=True)
+> (MED-3). Emma's 🔴 mandatory fix (гид в finally) + 🟡 test pin via is_closed.
 
 ## B3 + B4 + B4.5 closure summary
 
