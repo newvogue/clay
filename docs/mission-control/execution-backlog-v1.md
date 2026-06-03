@@ -77,6 +77,7 @@
 - `E10` Knowledge base and research layer
 - `E11` Backtesting, replay and model/strategy activation
 - `E12` Reliability, degraded mode and release readiness
+- `E13` Exchange abstraction and multi-exchange portability (Wave E, после Wave D) — см. [ADR-008](adrs/adr-008-exchange-abstraction-and-multi-exchange-portability.md)
 
 ---
 
@@ -627,6 +628,17 @@
 
 **Dependencies:** `E1`–`E11`  
 **Deliverable:** release readiness checklist
+
+---
+
+## E13. Exchange Abstraction And Multi-Exchange Portability
+
+**Цель:** абстракция источника рыночных данных — см. [ADR-008](adrs/adr-008-exchange-abstraction-and-multi-exchange-portability.md).
+
+Декомпозиция планируется после завершения Wave D (live rehearsal Binance, текущий эпик). ADR-008 содержит предварительные слайсы E0–E6.
+
+**Dependencies:** `E2`, `Wave D`  
+**Deliverable:** multi-exchange ingestion spec
 
 ---
 
