@@ -18,6 +18,7 @@ class IngestionSettings(BaseSettings):
     market_timeframes: list[str] = Field(
         default_factory=lambda: ["5m", "15m", "1h"],
     )
+    binance_base_url: str = "https://api.binance.com"
     market_fetch_max_attempts: int = 2
     market_fetch_retry_delay_seconds: float = 0.5
     news_connector_ids: list[str] = Field(default_factory=lambda: ["demo-news"])

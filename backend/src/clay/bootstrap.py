@@ -173,7 +173,9 @@ def build_services(
     preflight_service = PreflightService(registry)
 
     ingestion_settings = IngestionSettings()
-    market_ingestion_service = MarketIngestionService(BinanceSpotClient())
+    market_ingestion_service = MarketIngestionService(
+        BinanceSpotClient(base_url=ingestion_settings.binance_base_url),
+    )
 
     context_connector_manager = ContextConnectorManager(
         _build_default_context_connectors(ingestion_settings),
@@ -182,6 +184,7 @@ def build_services(
         settings=ingestion_settings,
         market_service=market_ingestion_service,
         context_manager=context_connector_manager,
+        session_factory=session_factory,  # type: ignore[arg-type]  # C3: build_services always called with session_factory in prod+integration
         audit_writer=audit_writer,
         event_bus=event_bus,
     )

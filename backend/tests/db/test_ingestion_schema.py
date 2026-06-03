@@ -17,6 +17,7 @@ def test_ingestion_settings_expose_v1_timeframes() -> None:
     assert settings.market_timeframes == ["5m", "15m", "1h"]
     assert settings.market_symbols == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     assert settings.binance_spot_enabled is True
+    assert settings.binance_base_url == "https://api.binance.com"
 
 
 def test_database_bootstrap_uses_configured_url() -> None:

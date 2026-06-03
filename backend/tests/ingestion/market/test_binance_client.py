@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from clay.ingestion.market.binance_client import BinanceSpotClient
+from clay.settings.ingestion import IngestionSettings
 
 
 @pytest.mark.anyio
@@ -121,3 +122,44 @@ async def test_set_http_client_replaces_injected_client() -> None:
         # Setter accepts None to clear (useful for reset between tests).
         client.set_http_client(None)
         assert client._client is None
+
+
+@pytest.mark.anyio
+async def test_fetch_klines_uses_custom_base_url_from_setting() -> None:
+    """D2: ``IngestionSettings.binance_base_url`` controls the request URL.
+
+    A custom value is wired through to the client and reflected in
+    the request path.
+    """
+    called_url: str | None = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called_url
+        called_url = str(request.url)
+        return httpx.Response(200, json=[])
+
+    settings = IngestionSettings(binance_base_url="https://data-api.binance.vision")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock_client:
+        client = BinanceSpotClient(
+            base_url=settings.binance_base_url,
+            client=mock_client,
+        )
+        await client.fetch_klines(symbol="BTCUSDT", interval="5m", limit=1)
+
+    assert called_url is not None
+    assert called_url.startswith("https://data-api.binance.vision/api/v3/klines")
+
+
+@pytest.mark.anyio
+async def test_base_url_strips_trailing_slash() -> None:
+    """D2: trailing ``/`` on the base URL is stripped to avoid double-slash."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "//api/v3" not in str(request.url)
+        return httpx.Response(200, json=[])
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock_client:
+        client = BinanceSpotClient(
+            base_url="https://api.binance.com/",
+            client=mock_client,
+        )
+        await client.fetch_klines(symbol="BTCUSDT", interval="5m", limit=1)
