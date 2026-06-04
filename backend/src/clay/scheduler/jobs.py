@@ -57,7 +57,7 @@ over verbatim.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
 from clay.ingestion.service import IngestionCycleBusy, IngestionRunSummary
@@ -107,7 +107,7 @@ class _IngestionCycleRunnable(Protocol):
     def is_running(self) -> bool: ...
 
     async def run_once(
-        self, session: Any, *, emit: bool = ...,
+        self, *, emit: bool = ...,
     ) -> IngestionRunSummary: ...
 
     def emit_cycle_events(self, summary: IngestionRunSummary) -> None: ...
@@ -364,12 +364,10 @@ class IngestionCycleJob:
         self,
         *,
         ingestion_service: _IngestionCycleRunnable,
-        session_factory: sessionmaker,
         audit_writer: AuditWriter,
         event_bus: EventBus,  # reserved (v2: ingestion.tick)
     ) -> None:
         self._service = ingestion_service
-        self._session_factory = session_factory
         self._audit_writer = audit_writer
         self._event_bus = event_bus
         # First-run seed; cleared on the first successful run().
@@ -387,25 +385,16 @@ class IngestionCycleJob:
                 "clay.scheduler: ingestion cycle already running, skip tick",
             )
             return
-        # Step 2: open session, call service, commit, reset episode.
-        with self._session_factory() as session:
-            try:
-                summary = await self._service.run_once(session, emit=False)
-            except IngestionCycleBusy:
-                # TOCTOU race: a second caller grabbed the service's
-                # lock between the ``is_running`` check and the
-                # ``run_once`` call. Log and skip — do not propagate
-                # to ``session-scheduler``.
-                logger.info(
-                    "clay.scheduler: ingestion cycle started mid-tick, skip",
-                )
-                return
-        # B6 cleanup: the prior ``session.commit()`` here was a
-        # harmless no-op — ``IngestionCycleService._do_run_once``
-        # already commits under its own ``asyncio.Lock``
-        # (ingestion/service.py:177). The outer session is left
-        # open until the ``with`` block exits; no explicit commit
-        # is needed here.
+        # Step 2: C3 — session lifecycle is owned by
+        # ``IngestionCycleService._persist`` inside ``to_thread``.
+        # The job just calls ``run_once(emit=False)``.
+        try:
+            summary = await self._service.run_once(emit=False)
+        except IngestionCycleBusy:
+            logger.info(
+                "clay.scheduler: ingestion cycle started mid-tick, skip",
+            )
+            return
         # B4 #11: a successful tick closes the failing episode so a
         # later failure re-emits ``ingestion.cycle_failed``.
         self._failing = False
@@ -455,5 +444,81 @@ class IngestionCycleJob:
         self._failing = True
         logger.exception(
             "clay.scheduler: ingestion cycle failed; "
+            "session-scheduler NOT marked ERROR (isolated policy)",
+        )
+
+
+class OpsRetentionJob:
+    """MP1 scheduler-driven ops.* retention prune-job — sync callable for thread-pool.
+
+    Each tick opens a transient session, prunes the 3 ops.* telemetry
+    tables (``ingest_runs``, ``connector_status_history``,
+    ``source_health_events``) by their respective retention windows,
+    commits, and logs per-table deletion counts.
+
+    Construction: explicit ``session_factory`` DI (never imports
+    ``clay.bootstrap``). The job owns its session lifecycle — the
+    session is created, used, and closed entirely inside the worker
+    thread (confirm (a): sync on threadpool).
+
+    Error policy (isolated, mirroring ``ReliabilityRecheckJob``):
+    exceptions are caught by ``ClayScheduler._run_safely``, which
+    delegates to ``on_error`` (writes ``ops.retention_failed`` audit)
+    and does **not** flip ``session-scheduler`` to ``ERROR``.
+    """
+
+    def __init__(
+        self,
+        *,
+        session_factory: sessionmaker,
+        audit_writer: AuditWriter,
+    ) -> None:
+        self._session_factory = session_factory
+        self._audit_writer = audit_writer
+        self._failing: bool = False
+
+    def run(self) -> None:
+        """Execute one ops-retention tick — prune all 3 tables, then commit."""
+        from sqlalchemy import delete
+        from clay.retention.jobs import RETENTION_WINDOWS_DAYS
+        from clay.db.models_ops import IngestRun, ConnectorStatusHistory, SourceHealthEvent
+
+        now = datetime.now(UTC)
+        deleted_total = 0
+        with self._session_factory() as session:
+            for model_class, time_col_name, window_days in [
+                (IngestRun, "started_at", RETENTION_WINDOWS_DAYS["ingest_runs"]),
+                (ConnectorStatusHistory, "observed_at", RETENTION_WINDOWS_DAYS["connector_status_history"]),
+                (SourceHealthEvent, "recorded_at", RETENTION_WINDOWS_DAYS["source_health_events"]),
+            ]:
+                cutoff = now - timedelta(days=window_days)
+                time_col = getattr(model_class, time_col_name)
+                result = session.execute(
+                    delete(model_class).where(time_col < cutoff)
+                )
+                deleted_total += result.rowcount
+            session.commit()
+        self._failing = False
+        if deleted_total > 0:
+            logger.info(
+                "clay.scheduler: ops-retention pruned %d rows",
+                deleted_total,
+            )
+
+    def on_error(self, exc: Exception) -> None:
+        """Isolated error policy for the ops-retention job.
+
+        Called by ``ClayScheduler._run_safely`` on a tick exception.
+        Writes ``ops.retention_failed`` once per failing episode
+        (B3b-style anti-flood). Does **not** mutate
+        ``session-scheduler`` status — the scheduler keeps running.
+        """
+        if not self._failing:
+            self._audit_writer.write(
+                "ops.retention_failed", {"error": str(exc)},
+            )
+        self._failing = True
+        logger.exception(
+            "clay.scheduler: ops retention failed; "
             "session-scheduler NOT marked ERROR (isolated policy)",
         )

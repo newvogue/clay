@@ -50,6 +50,11 @@ class SchedulerSettings(BaseSettings):
     # Default ``True`` mirrors the B4 ``reliability_enabled`` shape.
     ingestion_enabled: bool = True
 
+    # MP1: gate for the ``ops-retention`` prune-job. ``False`` skips
+    # registration (with no warning — a documented operator opt-out).
+    # Default ``True`` — retention is safety-critical; deliberate opt-out only.
+    ops_retention_enabled: bool = True
+
     # B3a: drive the (future) health-tick job. The ``60s`` default
     # replaced the B2 hard-coded ``_DEFAULT_HEALTH_STALE_AFTER_SECONDS``
     # constant in ``bootstrap.py``.
@@ -62,6 +67,11 @@ class SchedulerSettings(BaseSettings):
     # in dev and it will simply be picked up when B4 lands.
     reliability_recheck_interval_seconds: int = 300
     ingestion_cycle_interval_seconds: int = 60
+
+    # MP1: interval for the ``ops-retention`` prune-job. Default 86400s
+    # (once per day). Operator can override via
+    # ``CLAY_SCHEDULER_OPS_RETENTION_INTERVAL_SECONDS``.
+    ops_retention_interval_seconds: int = 86400
 
     @model_validator(mode="after")
     def _stale_after_at_least_two_ticks(self) -> SchedulerSettings:

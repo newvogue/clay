@@ -40,11 +40,12 @@ from clay.settings.scheduler import SchedulerSettings
 from ._helpers import build_services_for_integration
 
 
-# Job ids from scheduler/service.py:107-110
+# Job ids from scheduler/service.py:107-112
 HEALTH_TICK = "health-tick"
 RELIABILITY_RECHECK = "reliability-recheck"
+OPS_RETENTION = "ops-retention"
 INGESTION_CYCLE = "ingestion-cycle"
-ALL_JOB_IDS = (HEALTH_TICK, RELIABILITY_RECHECK, INGESTION_CYCLE)
+ALL_JOB_IDS = (HEALTH_TICK, RELIABILITY_RECHECK, OPS_RETENTION, INGESTION_CYCLE)
 
 
 # --- helpers ---
@@ -179,7 +180,7 @@ async def test_routing_matrix_sync_vs_async(isolated_app) -> None:
 
 @pytest.mark.anyio
 async def test_scheduler_started_audit_event(isolated_app) -> None:
-    """``scheduler.started`` audit event is written with all 3 jobs in payload."""
+    """``scheduler.started`` audit event is written with all 4 jobs in payload."""
     app, services = isolated_app
     audit_path = services["audit_writer"].path
     async with LifespanManager(app):
@@ -232,7 +233,7 @@ async def test_reliability_disabled_skips_job_keeps_scheduler(
     started = _events_by_type(events, "scheduler.started")
     assert len(started) == 1
     assert sorted(started[0]["payload"]["jobs"]) == sorted(
-        [HEALTH_TICK, INGESTION_CYCLE]
+        [HEALTH_TICK, OPS_RETENTION, INGESTION_CYCLE]
     )
 
 
@@ -259,7 +260,7 @@ async def test_ingestion_disabled_skips_job_keeps_scheduler(
     started = _events_by_type(events, "scheduler.started")
     assert len(started) == 1
     assert sorted(started[0]["payload"]["jobs"]) == sorted(
-        [HEALTH_TICK, RELIABILITY_RECHECK]
+        [HEALTH_TICK, RELIABILITY_RECHECK, OPS_RETENTION]
     )
 
 

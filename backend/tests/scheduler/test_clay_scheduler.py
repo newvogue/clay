@@ -76,7 +76,9 @@ def _make_scheduler(
     event_bus = EventBus()
     health_monitor = HealthMonitor(registry, stale_after_seconds=60)
     if settings is None:
-        settings = SchedulerSettings(enabled=True)
+        settings = SchedulerSettings(
+            enabled=True, ops_retention_enabled=False,
+        )
     scheduler = ClayScheduler(
         settings=settings,
         registry=registry,
@@ -270,7 +272,10 @@ async def test_scheduler_started_jobs_reflects_actual_registration(
     ``scheduler.started`` payload that *claims*
     ``reliability-recheck`` is registered when it is not.
     """
-    settings = SchedulerSettings(enabled=True, reliability_enabled=True)
+    settings = SchedulerSettings(
+        enabled=True, reliability_enabled=True,
+        ops_retention_enabled=False,
+    )
     scheduler, _, audit_writer, *_ = _make_scheduler(
         tmp_path,
         settings=settings,
@@ -284,7 +289,9 @@ async def test_scheduler_started_jobs_reflects_actual_registration(
             e for e in _read_audit_events(audit_writer)
             if e["event_type"] == "scheduler.started"
         )
-        assert started["payload"]["jobs"] == ["health-tick", "reliability-recheck"]
+        assert started["payload"]["jobs"] == [
+            "health-tick", "reliability-recheck",
+        ]
     finally:
         scheduler.shutdown(wait=True)
 
@@ -324,10 +331,12 @@ async def test_loud_warning_when_reliability_enabled_but_deps_missing(
     # reliability_service and session_factory default to None — the
     # misconfiguration Q1 targets.
     scheduler, *_ = _make_scheduler(tmp_path, settings=settings)
-    with caplog.at_level(logging.WARNING, logger="clay.scheduler.service"):
-        scheduler.start()
-
+    _logger = logging.getLogger("clay.scheduler.service")
+    _logger.addHandler(caplog.handler)
     try:
+        with caplog.at_level(logging.WARNING, logger="clay.scheduler.service"):
+            scheduler.start()
+
         # Job not registered.
         assert scheduler._apscheduler.get_job("reliability-recheck") is None
         # Loud warning present.
@@ -343,6 +352,7 @@ async def test_loud_warning_when_reliability_enabled_but_deps_missing(
         # And signals it is a misconfiguration, not a normal skip.
         assert "NOT registered" in warning_text or "misconfiguration" in warning_text
     finally:
+        _logger.removeHandler(caplog.handler)
         scheduler.shutdown(wait=True)
 
 
@@ -405,7 +415,10 @@ async def test_ingestion_cycle_not_registered_when_disabled(
     tmp_path: Path,
 ) -> None:
     """``ingestion_enabled=False`` → no ``ingestion-cycle``; health-tick stays."""
-    settings = SchedulerSettings(enabled=True, ingestion_enabled=False)
+    settings = SchedulerSettings(
+        enabled=True, ingestion_enabled=False,
+        ops_retention_enabled=False,
+    )
     scheduler, *_ = _make_scheduler(
         tmp_path,
         settings=settings,
@@ -436,6 +449,7 @@ async def test_scheduler_started_jobs_3_ids_reflects_actual_registration(
         enabled=True,
         reliability_enabled=True,
         ingestion_enabled=True,
+        ops_retention_enabled=False,
     )
     scheduler, _, audit_writer, *_ = _make_scheduler(
         tmp_path,
@@ -474,10 +488,12 @@ async def test_loud_warning_when_ingestion_enabled_but_deps_missing(
     settings = SchedulerSettings(enabled=True, ingestion_enabled=True)
     # ingestion_cycle_service defaults to None — the misconfiguration Q1 targets.
     scheduler, *_ = _make_scheduler(tmp_path, settings=settings)
-    with caplog.at_level(logging.WARNING, logger="clay.scheduler.service"):
-        scheduler.start()
-
+    _logger = logging.getLogger("clay.scheduler.service")
+    _logger.addHandler(caplog.handler)
     try:
+        with caplog.at_level(logging.WARNING, logger="clay.scheduler.service"):
+            scheduler.start()
+
         assert scheduler._apscheduler.get_job("ingestion-cycle") is None
         warnings = [
             r for r in caplog.records
@@ -493,6 +509,7 @@ async def test_loud_warning_when_ingestion_enabled_but_deps_missing(
         )
         assert "NOT registered" in warning_text or "misconfiguration" in warning_text
     finally:
+        _logger.removeHandler(caplog.handler)
         scheduler.shutdown(wait=True)
 
 
@@ -576,6 +593,7 @@ async def test_T2_ingestion_cycle_actually_executes_on_scheduler(tmp_path: Path)
         enabled=True,
         ingestion_enabled=True,
         ingestion_cycle_interval_seconds=1,
+        ops_retention_enabled=False,
     )
     scheduler, *_ = _make_scheduler(
         tmp_path,

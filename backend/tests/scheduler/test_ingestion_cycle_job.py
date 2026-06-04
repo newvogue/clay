@@ -111,6 +111,9 @@ class FakeIngestionService:
     ``is_running`` defaults to ``False``; flip it manually to drive
     the skip-when-busy path. ``raise_busy_once`` flips ``is_running``
     inside the next ``run_once`` call to simulate a TOCTOU race.
+
+    C3: ``run_once`` no longer takes a ``session`` parameter — the
+    real service owns the session lifecycle inside ``_persist``.
     """
 
     def __init__(
@@ -124,7 +127,7 @@ class FakeIngestionService:
         self._incidents = 0
         self._transitions = 0
         self._is_running = False
-        self.run_once_calls: list[tuple[Any, bool]] = []
+        self.run_once_calls: list[bool] = []
         self.emit_calls: list[IngestionRunSummary] = []
         self._raise_busy_once = False
 
@@ -149,8 +152,8 @@ class FakeIngestionService:
         """
         self._raise_busy_once = True
 
-    async def run_once(self, session: Any, *, emit: bool = True) -> IngestionRunSummary:
-        self.run_once_calls.append((session, emit))
+    async def run_once(self, *, emit: bool = True) -> IngestionRunSummary:
+        self.run_once_calls.append(emit)
         if self._raise_busy_once:
             self._raise_busy_once = False
             raise IngestionCycleBusy("test race")
@@ -174,32 +177,6 @@ class FakeIngestionService:
         )
 
 
-class _FakeSession:
-    def __init__(self) -> None:
-        self.committed = False
-
-    def commit(self) -> None:
-        self.committed = True
-
-
-class _FakeSessionFactory:
-    """Context-manager-style fake ``sessionmaker`` for B5 tests."""
-
-    def __init__(self) -> None:
-        self.sessions: list[_FakeSession] = []
-
-    def __call__(self) -> _FakeSessionFactory:
-        return self
-
-    def __enter__(self) -> _FakeSession:
-        session = _FakeSession()
-        self.sessions.append(session)
-        return session
-
-    def __exit__(self, *exc_info: object) -> bool:
-        return False
-
-
 def _make_registry_with_session_scheduler() -> ServiceRegistry:
     registry = ServiceRegistry()
     registry.register(
@@ -218,27 +195,24 @@ def _make_job(
     FakeIngestionService,
     AuditWriter,
     EventBus,
-    _FakeSessionFactory,
 ]:
-    """Build an ``IngestionCycleJob`` with fakes for service + session_factory.
+    """Build an ``IngestionCycleJob`` with fakes for service + deps.
 
-    Mirrors ``test_reliability_recheck_job._make_job`` for shape
-    symmetry (B4 pattern reused verbatim).
+    C3: job no longer holds ``session_factory`` — session lifecycle
+    lives inside ``IngestionCycleService._persist``.
     """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
-    event_bus.subscribe()  # so _drain_event_bus sees published events
+    event_bus.subscribe()
     service = FakeIngestionService(
         audit_writer=audit_writer, event_bus=event_bus,
     )
-    factory = _FakeSessionFactory()
     job = IngestionCycleJob(
         ingestion_service=service,  # type: ignore[arg-type]
-        session_factory=factory,
         audit_writer=audit_writer,
         event_bus=event_bus,
     )
-    return job, service, audit_writer, event_bus, factory
+    return job, service, audit_writer, event_bus
 
 
 # === Tests ===
@@ -257,20 +231,18 @@ async def test_run_calls_run_once_emit_false_and_commits(tmp_path: Path) -> None
     explicit ``session.commit()`` here was a harmless no-op and is
     removed (B6 cleanup).
     """
-    job, service, _, _, factory = _make_job(tmp_path)
+    job, service, _, _ = _make_job(tmp_path)
 
     await job.run()
 
     assert len(service.run_once_calls) == 1
-    session_arg, emit_arg = service.run_once_calls[0]
-    assert emit_arg is False
-    assert session_arg in factory.sessions
+    assert service.run_once_calls[0] is False
 
 
 @pytest.mark.anyio
 async def test_first_run_seeds_cache_no_emit(tmp_path: Path) -> None:
     """Acceptance: first run seeds the cache, no audit, no bus."""
-    job, service, audit_writer, event_bus, _ = _make_job(tmp_path)
+    job, service, audit_writer, event_bus = _make_job(tmp_path)
 
     await job.run()
 
@@ -283,14 +255,14 @@ async def test_first_run_seeds_cache_no_emit(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_steady_state_no_emit(tmp_path: Path) -> None:
     """Acceptance: same state across 3 ticks → 0 audit, 0 bus."""
-    job, service, audit_writer, event_bus, _ = _make_job(tmp_path)
+    job, service, audit_writer, event_bus = _make_job(tmp_path)
 
     await job.run()  # first run — seed
     await job.run()  # steady
     await job.run()  # steady
 
     assert len(service.run_once_calls) == 3
-    assert all(call[1] is False for call in service.run_once_calls)
+    assert all(call is False for call in service.run_once_calls)
     assert service.emit_calls == []
     assert _read_audit_events(audit_writer) == []
     assert _drain_event_bus(event_bus) == []
@@ -299,7 +271,7 @@ async def test_steady_state_no_emit(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_transition_emits_audit_and_bus(tmp_path: Path) -> None:
     """Acceptance: state change → 1 audit + 1 bus via ``emit_cycle_events``."""
-    job, service, audit_writer, event_bus, _ = _make_job(tmp_path)
+    job, service, audit_writer, event_bus = _make_job(tmp_path)
 
     await job.run()  # first run — seed (0 incidents, 0 transitions)
     service.set_state(incidents=1, transitions=4)
@@ -329,7 +301,7 @@ async def test_on_error_audits_once(tmp_path: Path) -> None:
     on the transition into the failing episode, not on every
     consecutive failure.
     """
-    job, _, audit_writer, _, _ = _make_job(tmp_path)
+    job, _, audit_writer, _ = _make_job(tmp_path)
     boom = RuntimeError("boom")
 
     job.on_error(boom)
@@ -361,7 +333,6 @@ async def test_on_error_does_not_mutate_session_scheduler(tmp_path: Path) -> Non
     )
     job = IngestionCycleJob(
         ingestion_service=service,  # type: ignore[arg-type]
-        session_factory=_FakeSessionFactory(),
         audit_writer=audit_writer,
         event_bus=event_bus,
     )
@@ -374,7 +345,7 @@ async def test_on_error_does_not_mutate_session_scheduler(tmp_path: Path) -> Non
 @pytest.mark.anyio
 async def test_on_error_does_not_re_raise(tmp_path: Path) -> None:
     """Acceptance: ``on_error`` swallows any inner exception (caller-safe)."""
-    job, _, _, _, _ = _make_job(tmp_path)
+    job, _, _, _ = _make_job(tmp_path)
     # Direct call — must not raise.
     job.on_error(RuntimeError("boom"))
 
@@ -391,7 +362,7 @@ async def test_failure_success_failure_audits_twice(tmp_path: Path) -> None:
     Pattern mirrors ``test_reliability_recheck_job`` #8 — B4 #11
     is a mandatory carry-forward for every B4-pattern job.
     """
-    job, service, audit_writer, _, _ = _make_job(tmp_path)
+    job, service, audit_writer, _ = _make_job(tmp_path)
     boom = RuntimeError("boom")
 
     async def _raise(*args: Any, **kwargs: Any) -> Any:
@@ -437,7 +408,7 @@ async def test_skip_when_service_running(tmp_path: Path) -> None:
     worst-case back-pressure; this branch is the explicit
     observability of the TOCTOU path.
     """
-    job, service, audit_writer, event_bus, _ = _make_job(tmp_path)
+    job, service, audit_writer, event_bus = _make_job(tmp_path)
     service.set_running(True)
 
     await job.run()
@@ -465,7 +436,7 @@ async def test_race_concurrent_ingestion_raises_busy(tmp_path: Path) -> None:
     emits once — proving the race is a one-shot and the job is
     reusable across real ticks.
     """
-    job, service, audit_writer, event_bus, _ = _make_job(tmp_path)
+    job, service, audit_writer, event_bus = _make_job(tmp_path)
 
     # Seed the cache with a baseline state.
     service.set_state(incidents=0, transitions=0)

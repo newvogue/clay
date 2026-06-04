@@ -1,9 +1,31 @@
+"""Retention windows and prune-job for ops.* telemetry tables.
+
+Active tables (pruned by the scheduler-driven ``OpsRetentionJob``):
+
+* ``ingest_runs`` — 30d (per-cycle execution telemetry, ~130k/mo)
+* ``connector_status_history`` — 180d (~87k/mo)
+* ``source_health_events`` — 180d (only rows with errors, 0..3k/mo)
+
+Reserved windows (commented out, not actively pruned — kept for
+future one-line activation):
+
+* ``market_bars`` — 730d (product data; hypertable solution deferred to C0)
+* ``orderbook_summaries`` — 30d (dormant table)
+* ``market_features`` — 180d (synthetic, MVP-polish out of scope)
+* ``news_items`` — 180d (context data; still synthetic)
+* ``sentiment_snapshots`` — 180d (context data; still synthetic)
+"""
+
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
+
+from clay.db.models_ops import ConnectorStatusHistory, IngestRun, SourceHealthEvent
+
+
 RETENTION_WINDOWS_DAYS = {
-    "market_bars": 730,
-    "orderbook_summaries": 30,
-    "market_features": 180,
-    "news_items": 180,
-    "sentiment_snapshots": 180,
+    "ingest_runs": 30,
     "connector_status_history": 180,
     "source_health_events": 180,
 }

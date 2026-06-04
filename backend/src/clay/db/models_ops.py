@@ -15,7 +15,7 @@ class IngestRun(Base):
     source_name: Mapped[str] = mapped_column(String(64), index=True)
     source_type: Mapped[str] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     details_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 

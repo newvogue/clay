@@ -73,6 +73,7 @@ from clay.reliability.service import ReliabilityService
 from clay.scheduler.jobs import (
     HealthTickJob,
     IngestionCycleJob,
+    OpsRetentionJob,
     ReliabilityRecheckJob,
 )
 from clay.services.models import ServiceStatus
@@ -109,6 +110,7 @@ class ClayScheduler:
     _HEALTH_TICK_JOB_ID = "health-tick"
     _RELIABILITY_RECHECK_JOB_ID = "reliability-recheck"
     _INGESTION_CYCLE_JOB_ID = "ingestion-cycle"
+    _OPS_RETENTION_JOB_ID = "ops-retention"
 
     def __init__(
         self,
@@ -174,6 +176,7 @@ class ClayScheduler:
         self._apscheduler.start()
         self.add_health_tick_job()
         self.add_reliability_recheck_job()
+        self.add_ops_retention_job()
         self.add_ingestion_cycle_job()
         self._registry.update_status(self._SERVICE_ID, ServiceStatus.HEALTHY)
         jobs = [
@@ -181,6 +184,7 @@ class ClayScheduler:
             for job_id in (
                 self._HEALTH_TICK_JOB_ID,
                 self._RELIABILITY_RECHECK_JOB_ID,
+                self._OPS_RETENTION_JOB_ID,
                 self._INGESTION_CYCLE_JOB_ID,
             )
             if self._apscheduler.get_job(job_id) is not None
@@ -348,6 +352,50 @@ class ClayScheduler:
             seconds=self._settings.ingestion_cycle_interval_seconds,
             id=self._INGESTION_CYCLE_JOB_ID,
             executor="async",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            args=[job.run],
+            kwargs={"on_error": job.on_error},
+        )
+
+    def add_ops_retention_job(self) -> None:
+        """Register the MP1 ``OpsRetentionJob`` (flag-gated + dep-checked).
+
+        Two gates — in order — before registration:
+
+        1. ``ops_retention_enabled`` flag (``False`` → silent skip,
+           a documented operator opt-out, not a misconfiguration).
+        2. ``session_factory`` present. If ``None`` while the flag
+           is ``True``, emit a **loud warning** that names the
+           missing dep — this is a misconfiguration in dev/test
+           only; production (``lifespan.py``) always passes it.
+
+        Registration: sync job through ``_run_safely`` →
+        ``executor="default"`` (ThreadPoolExecutor). The DELETE
+        operations are pure sync-DB, must NOT run on the event
+        loop (C3 ruling). The session is created and closed
+        entirely inside the worker thread (confirm (a)).
+        """
+        if not self._settings.ops_retention_enabled:
+            return
+        if self._session_factory is None:
+            logger.warning(
+                "clay.scheduler: ops_retention_enabled=True but "
+                "session_factory is None — ops-retention job "
+                "NOT registered (misconfiguration)",
+            )
+            return
+        job = OpsRetentionJob(
+            session_factory=self._session_factory,
+            audit_writer=self._audit_writer,
+        )
+        self._apscheduler.add_job(
+            func=self._run_safely,
+            trigger="interval",
+            seconds=self._settings.ops_retention_interval_seconds,
+            id=self._OPS_RETENTION_JOB_ID,
+            executor="default",
             max_instances=1,
             coalesce=True,
             replace_existing=True,
