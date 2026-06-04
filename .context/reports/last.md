@@ -1,49 +1,46 @@
-# Report: Wave E — E3 produce-side multi-exchange seam
+# Report: MP1 (retention) + MP4 (loud-failure logging)
 
-> **Сессия 2026-06-04.** E1 (`6d6953f`), E2 (`d94e893`), E3 (this commit). **293 passed** (288 → 293, +5 net, 0 regress). Pyright src 35 (baseline 35).
+> **Сессия 2026-06-04 (продолжение).** E6a+b → MP0 → **MP1 ✅ + MP4 ✅**. **341 passed** (+9 net, 0 regress). Pyright src 35. 3 коммита в origin.
 
-## E3 — produce-side multi-exchange seam ✅
+## Что сделано
 
-### Решения Emma
-- E3 обрезан до produce-side (read-side вырезан в pre-E5 decision-gated слайс)
-- Product-fork: (i) primary-source preference — склон к этому
+### MP1 — ops.* retention ✅ (committed `facef1f`)
+- Миграция 0011: 3 индекса (all 3 ops time-cols)
+- `OpsRetentionJob`: sync, threadpool, session-owned, isolated error policy
+- 13 retention-тестов
+- Микрофикс: `index=True` на `IngestRun.started_at` (модель=DDL symmetry)
+- C3 (`routes/ingestion.py`) отделён в `c30a911`
 
-### Создано
-| Файл | Суть |
+### MP4 — loud-failure / observability ✅ (committed `a6b0e3f`)
+
+| Компонент | Что |
 |---|---|
-| `backend/src/clay/ingestion/market/exchange_config.py` | `ExchangeConfig` frozen dataclass |
-| `backend/src/clay/ingestion/market/factory.py` | `build_market_client` dispatch + `build_exchanges_map` |
-| `backend/tests/ingestion/market/test_factory.py` | 3 unit tests (binance, unknown fail-fast, exchanges map) |
+| `core/logging.py` | own-handler, `propagate=False`, sentinel guard, `CLAY_LOG_LEVEL` env |
+| `create_app()` wire | `configure_clay_logging()` первым вызовом |
+| Site 1: `_collect_market_bars` | `logger.warning(source, symbol, tf, exc)` |
+| Site 2: `_fetch_market_bars` retry | per-attempt `logger.warning` + финальный `logger.error` |
+| Site 3: `context/manager.py` | `logger.exception(connector_id, source_name)` |
+| Config tests (6) | propagate, anti-dup, level, env, format |
+| Emission tests (3) | StreamHandler-capture (caplog не достаёт из-за `propagate=False`) |
+| Caplog fix (2) | `test_clay_scheduler`, `test_context_repositories_dedup` |
 
-### Изменено
-| Файл | Суть |
-|---|---|
-| `ingestion/market/__init__.py` | +exports |
-| `ingestion/market/service.py` | `exchange_clients: dict[str, tuple[MarketDataClient, ExchangeConfig]]`; `set_http_client` iterates all |
-| `bootstrap.py` | `build_exchanges_map` + `build_market_client` вместо прямого `BinanceSpotClient` |
-| `ingestion/service.py` | `_MarketBatch.source`; outer exchange loop; per-exchange ingest runs; `batch.source` вместо `self.market_service.client.source` |
-| 6 test-файлов | dict-based `MarketIngestionService`; seam + isolation tests |
+## Acceptance
 
-### Проверки
-| Критерий | Статус |
-|---|---|
-| (a) production 1-exchange byte-identical | ✅ 288 baseline зелёные |
-| (b) factory fail-fast | ✅ ValueError на неизвестном exchange_id |
-| (c) per-exchange isolation | ✅ упавший → freshness unknown, здоровый → persist |
-| (d) read-side НЕ тронут | ✅ 9 call-sites + 3 dedup = 0 изменений |
-| (e) 0 новых ENV | ✅ flat settings не тронуты |
-| (f) A6: 0 import clay.bootstrap | ✅ |
-| (g) synthetic 2-exchange seam | ✅ dispatch доказан без Bybit |
-
-### Acceptance
-| | baseline | E3 | Δ |
+| | baseline | now | Δ |
 |---|---|---|---|
-| pytest | 288 | **293** | +5 (factory ×3 + seam + isolation) |
+| pytest | 332 | **341** | +9 net |
 | regressions | — | 0 | ✅ |
 | pyright src | 35 | **35** | 0 new |
-| migrations | — | 0 | ✅ |
+| pyright total | 196 | **194** | −2 |
+| migrations | 0011 | **0011** | ✅ |
 
-### Что дальше
-- **E4 (Bybit-адаптер, изолированно)** — чистый `MarketDataClient` имплементатор, symbol/tf-маппинг внутри адаптера, 0 вайринга в bootstrap/ingestion
-- **Read-side pre-E5** — source-фильтр + dedup + product decision (i)
-- **E5** — live-вайринг Bybit
+## Commit lineage
+```
+a6b0e3f feat(obs): MP4 loud-failure logging at 3 fetch/retry/context sites + clay logging config
+facef1f feat(ops): MP1 wire ops.* retention prune-job + 0011 indexes + started_at index
+c30a911 feat(ingestion): C3 route no longer owns session lifecycle
+38eb959 feat(ingestion): wire Bybit into exchanges map (config-gated, hermetic)
+```
+
+## Что дальше
+- **MP3** (config-driven providers) — ждёт слайса от Emma
