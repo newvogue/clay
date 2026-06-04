@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from clay.ingestion.market.binance_client import BinanceSpotClient
+from clay.ingestion.market.bybit_client import BybitClient
 from clay.ingestion.market.protocol import MarketDataClient
 
 
@@ -40,4 +41,18 @@ def test_binance_spot_client_source_is_overridable() -> None:
     """``source`` is an instance attribute — the constructor overrides the default."""
     custom = BinanceSpotClient(source="test_fixture")
     assert custom.source == "test_fixture"
+    assert isinstance(custom, MarketDataClient)
+
+
+def test_bybit_client_conforms_to_market_data_client() -> None:
+    """E4: ``BybitClient`` structurally conforms to ``MarketDataClient``."""
+    client = BybitClient()
+    assert isinstance(client, MarketDataClient)
+    assert client.source == "bybit_spot"
+
+
+def test_bybit_client_source_is_overridable() -> None:
+    """E4: BybitClient source is overridable via constructor."""
+    custom = BybitClient(source="test_bybit")
+    assert custom.source == "test_bybit"
     assert isinstance(custom, MarketDataClient)
