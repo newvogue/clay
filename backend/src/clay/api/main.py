@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from clay.api.lifespan import lifespan
+from clay.core.logging import configure_clay_logging
 from clay.api.routes.ai_control import router as ai_control_router
 from clay.api.routes.ai_control_stream import router as ai_control_stream_router
 from clay.api.routes.alpha import router as alpha_router
@@ -35,6 +36,7 @@ from clay.api.routes.workspace_stream import router as workspace_stream_router
 
 
 def create_app() -> FastAPI:
+    configure_clay_logging()
     app = FastAPI(
         title="Clay API",
         version="0.1.0",

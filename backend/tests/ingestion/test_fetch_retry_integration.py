@@ -4,16 +4,22 @@ D3: exercises the full retry loop with mocked
 ``market_service.fetch_and_normalize`` and a patched
 ``asyncio.sleep`` to verify that Retry-After headers are
 honoured (capped) and that non-429 paths are unchanged.
+
+MP4: also verifies that per-attempt warnings and final
+error log are emitted at the 3 no-log sites.
 """
 
 from __future__ import annotations
 
 import asyncio
+import io
+import logging
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from _pytest.monkeypatch import MonkeyPatch
 
 from clay.ingestion.market.exchange_config import ExchangeConfig
 from clay.ingestion.market.service import MarketIngestionService
@@ -226,3 +232,80 @@ async def test_retry_exhausted_raises_and_per_symbol_isolation() -> None:
             await service._fetch_market_bars(client=client, symbol="BTCUSDT", timeframe="5m")
 
     assert client.call_count == 2
+
+
+# --- MP4: log emission tests for site 1 (_collect_market_bars) and site 2 (retry loop) ---
+
+
+@pytest.mark.anyio
+async def test_retry_exhausted_logs_per_attempt_warning_and_final_error() -> None:
+    """MP4 site 2: per-attempt warning + final error on full retry exhaustion."""
+    error = _make_rate_limit_error(retry_after="1")
+    client = _ThrowingBinanceClient(error=error)
+    settings = IngestionSettings(market_fetch_max_attempts=3)
+    service = IngestionCycleService(
+        settings=settings,
+        market_service=MarketIngestionService(
+            {"test": (client, ExchangeConfig(
+                exchange_id="test", source="test",
+                enabled=True, base_url="http://fake",
+                symbols=settings.market_symbols, timeframes=settings.market_timeframes,
+            ))},
+        ),
+        context_manager=AsyncMock(),
+        session_factory=AsyncMock(),
+    )
+    logger = logging.getLogger("clay.ingestion")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.WARNING)
+    old_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        with MonkeyPatch().context() as mp:
+            mp.setattr(asyncio, "sleep", _tracking_sleep)
+            with pytest.raises(httpx.HTTPStatusError):
+                await service._fetch_market_bars(client=client, symbol="BTCUSDT", timeframe="5m")
+        output = stream.getvalue()
+        assert "attempt 1/3 failed" in output, f"missing per-attempt log, got: {output}"
+        assert "attempt 3/3 failed" in output, f"missing final-attempt log, got: {output}"
+        assert "all 3 attempts failed" in output, f"missing final error log, got: {output}"
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+
+
+@pytest.mark.anyio
+async def test_collect_market_bars_logs_warning_on_fetch_failure() -> None:
+    """MP4 site 1: _collect_market_bars logs warning before packing error into batch."""
+    error = _make_rate_limit_error(retry_after="1")
+    client = _ThrowingBinanceClient(error=error)
+    settings = IngestionSettings(market_fetch_max_attempts=1)
+    service = IngestionCycleService(
+        settings=settings,
+        market_service=MarketIngestionService(
+            {"test": (client, ExchangeConfig(
+                exchange_id="test", source="test",
+                enabled=True, base_url="http://fake",
+                symbols=settings.market_symbols, timeframes=settings.market_timeframes,
+            ))},
+        ),
+        context_manager=AsyncMock(),
+        session_factory=AsyncMock(),
+    )
+    logger = logging.getLogger("clay.ingestion")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(logging.WARNING)
+    old_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        batches = await service._collect_market_bars()
+        output = stream.getvalue()
+        assert "fetch failed" in output, f"missing site-1 warning, got: {output}"
+        assert any(b.error is not None for b in batches), "expected at least one error batch"
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)

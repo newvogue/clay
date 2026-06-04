@@ -102,21 +102,26 @@ def test_store_news_items_catches_integrity_error_on_race(
 
     db_session.scalar = MagicMock(side_effect=lying_scalar)
 
-    with caplog.at_level(logging.INFO, logger="clay.context"):
-        written = repository.store_news_items([pre_existing_payload])
+    _logger = logging.getLogger("clay.context")
+    _logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="clay.context"):
+            written = repository.store_news_items([pre_existing_payload])
 
-    db_session.scalar = original_scalar
-    db_session.commit()
+        db_session.scalar = original_scalar
+        db_session.commit()
 
-    # Must NOT raise — caught via savepoint
-    assert written == 0
-    # Verify log: dedup-skipped event
-    assert any(
-        "skipped duplicate news" in record.message
-        for record in caplog.records
-    )
-    # Exactly 1 row in DB (no double-insert)
-    assert len(repository.latest_news()) == 1
+        # Must NOT raise — caught via savepoint
+        assert written == 0
+        # Verify log: dedup-skipped event
+        assert any(
+            "skipped duplicate news" in record.message
+            for record in caplog.records
+        )
+        # Exactly 1 row in DB (no double-insert)
+        assert len(repository.latest_news()) == 1
+    finally:
+        _logger.removeHandler(caplog.handler)
 
 
 def test_store_news_items_savepoint_preserves_outer_session(db_session) -> None:
@@ -219,15 +224,20 @@ def test_store_sentiment_snapshots_catches_integrity_error_on_race(
 
     db_session.scalar = MagicMock(side_effect=lying_scalar)
 
-    with caplog.at_level(logging.INFO, logger="clay.context"):
-        written = repository.store_sentiment_snapshots([payload])
+    _logger = logging.getLogger("clay.context")
+    _logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.INFO, logger="clay.context"):
+            written = repository.store_sentiment_snapshots([payload])
 
-    db_session.scalar = original_scalar
-    db_session.commit()
+        db_session.scalar = original_scalar
+        db_session.commit()
 
-    assert written == 0
-    assert any(
-        "skipped duplicate sentiment" in record.message
-        for record in caplog.records
-    )
-    assert len(repository.latest_sentiment()) == 1
+        assert written == 0
+        assert any(
+            "skipped duplicate sentiment" in record.message
+            for record in caplog.records
+        )
+        assert len(repository.latest_sentiment()) == 1
+    finally:
+        _logger.removeHandler(caplog.handler)

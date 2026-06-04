@@ -1,8 +1,11 @@
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from clay.ingestion.context.contracts import ContextConnector
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -59,6 +62,10 @@ class ContextConnectorManager:
                     ),
                 )
             except Exception as exc:  # pragma: no cover - defensive runtime branch
+                logger.exception(
+                    "clay.ingestion.context: connector %s (%s) failed",
+                    connector.connector_id, connector.source_name,
+                )
                 results.append(
                     ConnectorRunResult(
                         connector_id=connector.connector_id,

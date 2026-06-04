@@ -294,6 +294,10 @@ class IngestionCycleService:
                             symbol=symbol, timeframe=timeframe, bars=bars,
                         ))
                     except Exception as exc:
+                        logger.warning(
+                            "clay.ingestion: %s %s %s — fetch failed: %s",
+                            config.source, symbol, timeframe, exc,
+                        )
                         batches.append(_MarketBatch(
                             source=config.source,
                             symbol=symbol, timeframe=timeframe,
@@ -543,6 +547,11 @@ class IngestionCycleService:
                 )
             except Exception as exc:
                 last_error = exc
+                logger.warning(
+                    "clay.ingestion: %s %s — attempt %d/%d failed (%s)",
+                    symbol, timeframe, attempt,
+                    self.settings.market_fetch_max_attempts, type(exc).__name__,
+                )
                 if attempt >= self.settings.market_fetch_max_attempts:
                     break
                 delay = _resolve_retry_delay(
@@ -558,6 +567,10 @@ class IngestionCycleService:
                 await asyncio.sleep(delay)
 
         if last_error is not None:
+            logger.error(
+                "clay.ingestion: %s %s — all %d attempts failed",
+                symbol, timeframe, self.settings.market_fetch_max_attempts,
+            )
             raise last_error
         raise RuntimeError(f"market ingest failed without exception for {symbol}:{timeframe}")
 
