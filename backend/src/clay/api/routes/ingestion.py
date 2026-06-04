@@ -120,20 +120,17 @@ async def get_ingestion_health(
 
 @router.post("/run")
 async def run_ingestion_cycle(
-    session: Annotated[Session, Depends(get_db_session)],
     service: Annotated[IngestionCycleService, Depends(get_ingestion_cycle_service)],
 ) -> dict[str, object]:
     """Run one ingestion cycle, then return the run summary.
 
-    B5 contract: the service's ``run_once(session, emit=True)``
-    owns the audit + bus emission (single source of payload
-    shape, shared with the B5 ``IngestionCycleJob``). The route
-    just translates ``IngestionCycleBusy`` into ``409 Conflict``
-    so an operator double-click of "Run cycle" gets a clear
-    status code instead of a stack trace.
+    C3: session lifecycle is owned by ``IngestionCycleService``
+    (persist runs in ``to_thread`` with its own session). The
+    route is no longer coupled to ``get_db_session`` — just
+    calls ``service.run_once(emit=True)``.
     """
     try:
-        summary = await service.run_once(session, emit=True)
+        summary = await service.run_once(emit=True)
     except IngestionCycleBusy as exc:
         raise HTTPException(
             status_code=409,
