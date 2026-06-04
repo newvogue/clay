@@ -20,6 +20,8 @@ class IngestionSettings(BaseSettings):
     )
     binance_base_url: str = "https://api.binance.com"
     binance_retry_after_cap_seconds: float = 60.0
+    bybit_spot_enabled: bool = False
+    bybit_base_url: str = "https://api.bybit.com"
     market_fetch_max_attempts: int = 2
     market_fetch_retry_delay_seconds: float = 0.5
     news_connector_ids: list[str] = Field(default_factory=lambda: ["demo-news"])

@@ -13,6 +13,9 @@ def build_market_client(cfg: ExchangeConfig) -> MarketDataClient:
     if cfg.exchange_id == "binance_spot":
         from clay.ingestion.market.binance_client import BinanceSpotClient  # noqa: PLC0415 — lazy import avoids circular deps
         return BinanceSpotClient(base_url=cfg.base_url, source=cfg.source)
+    if cfg.exchange_id == "bybit_spot":
+        from clay.ingestion.market.bybit_client import BybitClient  # noqa: PLC0415 — lazy import avoids circular deps
+        return BybitClient(base_url=cfg.base_url, source=cfg.source)
     msg = f"unknown exchange_id: {cfg.exchange_id!r}"
     raise ValueError(msg)
 
@@ -29,7 +32,7 @@ def build_exchanges_map(
     No new env vars are introduced — backward compat with the flat
     settings is maintained.
     """
-    return {
+    exchanges: dict[str, ExchangeConfig] = {
         "binance_spot": ExchangeConfig(
             exchange_id="binance_spot",
             source="binance_spot",
@@ -39,3 +42,13 @@ def build_exchanges_map(
             timeframes=list(settings.market_timeframes),
         ),
     }
+    if settings.bybit_spot_enabled:
+        exchanges["bybit_spot"] = ExchangeConfig(
+            exchange_id="bybit_spot",
+            source="bybit_spot",
+            enabled=True,
+            base_url=settings.bybit_base_url,
+            symbols=list(settings.market_symbols),
+            timeframes=list(settings.market_timeframes),
+        )
+    return exchanges
