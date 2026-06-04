@@ -6,6 +6,23 @@ from sqlalchemy.orm import Session
 from clay.db.models_market import MarketBar, MarketFreshnessStatus
 
 
+_source_priority: list[str] | None = None
+
+
+def set_source_priority(priority: list[str] | None) -> None:
+    global _source_priority
+    _source_priority = priority
+
+
+def _priority_index(source: str) -> int:
+    if _source_priority is None:
+        return 0
+    try:
+        return _source_priority.index(source)
+    except ValueError:
+        return len(_source_priority)
+
+
 class MarketRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -143,6 +160,10 @@ class MarketRepository:
             query = query.where(MarketBar.timeframe == timeframe)
 
         bars = list(self.session.scalars(query).all())
+
+        if _source_priority is not None:
+            bars.sort(key=lambda b: _priority_index(b.source))
+
         deduped: list[MarketBar] = []
         seen: set[tuple[str, str]] = set()
         for bar in bars:
@@ -160,4 +181,19 @@ class MarketRepository:
             MarketFreshnessStatus.symbol.asc(),
             MarketFreshnessStatus.timeframe.asc(),
         )
-        return list(self.session.scalars(query).all())
+        rows = list(self.session.scalars(query).all())
+
+        if _source_priority is None:
+            return rows  # backward compat: all sources, no collapse
+
+        rows.sort(key=lambda r: _priority_index(r.source))
+
+        deduped: list[MarketFreshnessStatus] = []
+        seen: set[tuple[str, str]] = set()
+        for row in rows:
+            key = (row.symbol, row.timeframe)
+            if key in seen:
+                continue
+            deduped.append(row)
+            seen.add(key)
+        return deduped

@@ -32,6 +32,7 @@ from clay.alpha.service import AlphaReadinessService
 from clay.audit.writer import AuditWriter
 from clay.config.loader import ConfigLoader
 from clay.control_center.service import ControlCenterService
+from clay.db.repositories_market import set_source_priority
 from clay.db.session import build_session_factory
 from clay.demo_trading.service import DemoTradingService
 from clay.events.bus import EventBus
@@ -174,6 +175,7 @@ def build_services(
 
     ingestion_settings = IngestionSettings()
     exchanges_map = build_exchanges_map(ingestion_settings)
+    set_source_priority([cfg.source for cfg in exchanges_map.values()])
     exchange_clients = {
         eid: (build_market_client(cfg), cfg)
         for eid, cfg in exchanges_map.items()
