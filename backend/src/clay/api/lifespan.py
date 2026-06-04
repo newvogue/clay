@@ -58,6 +58,7 @@ from clay.bootstrap import (
     event_bus as _event_bus,
     health_monitor as _health_monitor,
     ingestion_cycle_service as _ingestion_cycle_service,
+    ingestion_settings as _ingestion_settings,
     market_ingestion_service as _market_ingestion_service,
     registry as _registry,
     reliability_service as _reliability_service,
@@ -99,10 +100,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # see it from their very first tick. Created on the running loop
         # (lifespan runs inside uvicorn's event loop), not at import time.
         http_client = httpx.AsyncClient(
-            timeout=10.0,
+            timeout=_ingestion_settings.market_fetch_timeout,
             limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
+                max_connections=_ingestion_settings.market_limits_max_connections,
+                max_keepalive_connections=_ingestion_settings.market_limits_max_keepalive,
             ),
         )
         _market_ingestion_service.set_http_client(http_client)

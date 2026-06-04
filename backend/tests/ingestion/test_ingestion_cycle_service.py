@@ -288,7 +288,7 @@ async def test_freshness_state_transitions_increment_only_on_actual_change(
     # so the first run INSERTs all 4 records as "fresh".
     status_box = {"status": "fresh"}
 
-    def _fake_evaluate(timeframe: str, last_received_at: Any, now: Any) -> FreshnessResult:
+    def _fake_evaluate(timeframe: str, last_received_at: Any, now: Any, **kwargs: Any) -> FreshnessResult:
         return FreshnessResult(
             stream_name=f"market:{timeframe}",
             status=status_box["status"],

@@ -5,17 +5,17 @@ from clay.ingestion.market.protocol import MarketDataClient
 from clay.settings.ingestion import IngestionSettings
 
 
-def build_market_client(cfg: ExchangeConfig) -> MarketDataClient:
+def build_market_client(cfg: ExchangeConfig, timeout: float = 10.0) -> MarketDataClient:
     """Create a ``MarketDataClient`` from an ``ExchangeConfig``.
 
     Raises ``ValueError`` for unknown ``exchange_id`` (fail-fast).
     """
     if cfg.exchange_id == "binance_spot":
         from clay.ingestion.market.binance_client import BinanceSpotClient  # noqa: PLC0415 — lazy import avoids circular deps
-        return BinanceSpotClient(base_url=cfg.base_url, source=cfg.source)
+        return BinanceSpotClient(base_url=cfg.base_url, source=cfg.source, timeout=timeout)
     if cfg.exchange_id == "bybit_spot":
         from clay.ingestion.market.bybit_client import BybitClient  # noqa: PLC0415 — lazy import avoids circular deps
-        return BybitClient(base_url=cfg.base_url, source=cfg.source)
+        return BybitClient(base_url=cfg.base_url, source=cfg.source, timeout=timeout)
     msg = f"unknown exchange_id: {cfg.exchange_id!r}"
     raise ValueError(msg)
 

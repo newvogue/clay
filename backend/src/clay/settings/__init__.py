@@ -1,3 +1,4 @@
 from clay.settings.ingestion import IngestionSettings
+from clay.settings.scheduler import SchedulerSettings
 
-__all__ = ["IngestionSettings"]
+__all__ = ["IngestionSettings", "SchedulerSettings"]

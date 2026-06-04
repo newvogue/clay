@@ -28,3 +28,16 @@ class IngestionSettings(BaseSettings):
     sentiment_connector_ids: list[str] = Field(
         default_factory=lambda: ["demo-sentiment"],
     )
+
+    # === MP3: config-driven providers — hardcode → settings ===
+
+    market_fetch_limit: int = 200
+    market_fetch_timeout: float = 10.0
+    market_limits_max_connections: int = 20
+    market_limits_max_keepalive: int = 10
+
+    market_freshness_5m_minutes: int = 10
+    market_freshness_15m_minutes: int = 25
+    market_freshness_1h_minutes: int = 80
+    context_freshness_news_hours: int = 8
+    context_freshness_sentiment_hours: int = 4

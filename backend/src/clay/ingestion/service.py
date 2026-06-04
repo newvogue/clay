@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email import utils as email_utils
 from typing import Any
 
@@ -185,6 +185,11 @@ class IngestionCycleService:
         self._audit_writer = audit_writer
         self._event_bus = event_bus
         self._lock = asyncio.Lock()
+        self._market_thresholds: dict[str, timedelta] = {
+            "5m": timedelta(minutes=settings.market_freshness_5m_minutes),
+            "15m": timedelta(minutes=settings.market_freshness_15m_minutes),
+            "1h": timedelta(minutes=settings.market_freshness_1h_minutes),
+        }
 
     @property
     def is_running(self) -> bool:
@@ -413,6 +418,7 @@ class IngestionCycleService:
                     timeframe=batch.timeframe,
                     last_received_at=latest_bar.bar_close_time,
                     now=datetime.now(UTC),
+                    market_thresholds=self._market_thresholds,
                 )
                 state_changed = market_repo.upsert_freshness_status(
                     symbol=batch.symbol, timeframe=batch.timeframe,
@@ -543,7 +549,7 @@ class IngestionCycleService:
                 return await client.fetch_klines(
                     symbol=symbol,
                     interval=timeframe,
-                    limit=200,
+                    limit=self.settings.market_fetch_limit,
                 )
             except Exception as exc:
                 last_error = exc

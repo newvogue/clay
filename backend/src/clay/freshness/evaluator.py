@@ -26,6 +26,8 @@ def evaluate_market_freshness(
     timeframe: str,
     last_received_at: datetime | None,
     now: datetime,
+    *,
+    market_thresholds: dict[str, timedelta] | None = None,
 ) -> FreshnessResult:
     if last_received_at is None:
         return FreshnessResult(
@@ -39,7 +41,8 @@ def evaluate_market_freshness(
     last_received_at = _coerce_timezone(last_received_at)
     now = _coerce_timezone(now)
     delta = now - last_received_at
-    threshold = MARKET_THRESHOLDS[timeframe]
+    thresholds = market_thresholds if market_thresholds is not None else MARKET_THRESHOLDS
+    threshold = thresholds[timeframe]
     status = "fresh" if delta <= threshold else "stale"
     return FreshnessResult(
         stream_name=f"market:{timeframe}",
@@ -54,6 +57,8 @@ def evaluate_context_freshness(
     stream_name: str,
     last_received_at: datetime | None,
     now: datetime,
+    *,
+    context_thresholds: dict[str, timedelta] | None = None,
 ) -> FreshnessResult:
     if last_received_at is None:
         return FreshnessResult(
@@ -66,8 +71,9 @@ def evaluate_context_freshness(
 
     last_received_at = _coerce_timezone(last_received_at)
     now = _coerce_timezone(now)
-    threshold = CONTEXT_THRESHOLDS[stream_name]
+    thresholds = context_thresholds if context_thresholds is not None else CONTEXT_THRESHOLDS
     delta = now - last_received_at
+    threshold = thresholds[stream_name]
     status = "fresh" if delta <= threshold else "degraded"
     return FreshnessResult(
         stream_name=f"context:{stream_name}",
@@ -84,11 +90,13 @@ def resolve_market_freshness_status(
     timeframe: str,
     latest_bar_open_time: datetime | None,
     now: datetime,
+    market_thresholds: dict[str, timedelta] | None = None,
 ) -> FreshnessResult:
     evaluated = evaluate_market_freshness(
         timeframe=timeframe,
         last_received_at=latest_bar_open_time,
         now=now,
+        market_thresholds=market_thresholds,
     )
     effective_status = _worse_market_status(stored_status, evaluated.status)
     reason = evaluated.reason
