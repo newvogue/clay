@@ -7,21 +7,27 @@ client path is the production path (``bootstrap.py`` wires
 ``BinanceSpotClient`` without injecting a client, but every caller in the
 ingestion stack passes through the same ``get -> raise_for_status -> json``
 sequence covered here).
+
+E1: ``fetch_klines`` now returns ``list[NormalizedMarketBar]`` —
+normalization is internal to the client.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 
 from clay.ingestion.market.binance_client import BinanceSpotClient
+from clay.ingestion.market.models import NormalizedMarketBar
 from clay.settings.ingestion import IngestionSettings
 
 
 @pytest.mark.anyio
-async def test_fetch_klines_returns_parsed_payload() -> None:
-    """``fetch_klines`` parses ``/api/v3/klines`` JSON into a list."""
-    expected_kline = [
+async def test_fetch_klines_returns_normalized_bars() -> None:
+    """E1: ``fetch_klines`` returns ``NormalizedMarketBar`` list (not raw arrays)."""
+    raw_kline = [
         1711954800000,
         "70250.10",
         "70420.00",
@@ -34,7 +40,7 @@ async def test_fetch_klines_returns_parsed_payload() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v3/klines"
-        return httpx.Response(200, json=[expected_kline])
+        return httpx.Response(200, json=[raw_kline])
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as mock_client:
         client = BinanceSpotClient(
@@ -44,7 +50,20 @@ async def test_fetch_klines_returns_parsed_payload() -> None:
 
         result = await client.fetch_klines(symbol="BTCUSDT", interval="5m", limit=1)
 
-    assert result == [expected_kline]
+    assert len(result) == 1
+    bar = result[0]
+    assert isinstance(bar, NormalizedMarketBar)
+    assert bar.symbol == "BTCUSDT"
+    assert bar.timeframe == "5m"
+    assert bar.open == 70250.10
+    assert bar.high == 70420.00
+    assert bar.low == 70180.40
+    assert bar.close == 70390.20
+    assert bar.volume == 123.45
+    assert bar.quote_volume == 8670000.10
+    assert bar.source == "binance_spot"
+    assert bar.bar_open_time == datetime(2024, 4, 1, 7, 0, tzinfo=UTC)
+    assert bar.bar_close_time == datetime(2024, 4, 1, 7, 14, 59, 999000, tzinfo=UTC)
 
 
 @pytest.mark.anyio
@@ -53,8 +72,10 @@ async def test_fetch_klines_creates_async_client_per_call_when_none_injected() -
     via constructor or ``set_http_client``, ``fetch_klines`` builds a new
     ``httpx.AsyncClient`` per call. Pinned for unit-test / script paths
     that bypass the lifespan-owned client.
+
+    E1: still verifies the HTTP path reaches Binance and normalizes.
     """
-    expected_kline = [
+    raw_kline = [
         1711954800000,
         "70100.00",
         "70200.00",
@@ -67,7 +88,7 @@ async def test_fetch_klines_creates_async_client_per_call_when_none_injected() -
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/v3/klines"
-        return httpx.Response(200, json=[expected_kline])
+        return httpx.Response(200, json=[raw_kline])
 
     # No client=... in constructor, no set_http_client call → else-branch.
     client = BinanceSpotClient(base_url="https://test.invalid")
@@ -95,7 +116,8 @@ async def test_fetch_klines_creates_async_client_per_call_when_none_injected() -
     finally:
         binance_module.httpx.AsyncClient = original_async_client  # type: ignore[assignment]
 
-    assert result == [expected_kline]
+    assert len(result) == 1
+    assert result[0].close == 70180.20
     # And: client._client remains None (injection did not happen).
     assert client._client is None
 

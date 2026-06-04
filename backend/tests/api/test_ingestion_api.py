@@ -11,6 +11,7 @@ from clay.db.repositories_ops import OpsRepository
 from clay.ingestion.context.connectors.demo_news import DemoNewsConnector
 from clay.ingestion.context.connectors.demo_sentiment import DemoSentimentConnector
 from clay.ingestion.context.manager import ContextConnectorManager
+from clay.ingestion.market.models import NormalizedMarketBar
 from clay.ingestion.market.service import MarketIngestionService
 from clay.ingestion.service import IngestionCycleService
 
@@ -186,24 +187,34 @@ def test_ingestion_health_recomputes_market_staleness_from_latest_bar_time(
 
 
 class FakeBinanceClient:
+    """E1: conforms to ``MarketDataClient`` protocol."""
+
+    source: str = "test"
+
     async def fetch_klines(self, symbol: str, interval: str, limit: int = 200):
         del symbol, interval, limit
         return [
-            [
-                1711954800000,
-                "70250.10",
-                "70420.00",
-                "70180.40",
-                "70390.20",
-                "123.45",
-                1711955699999,
-                "8670000.10",
-            ],
+            NormalizedMarketBar(
+                symbol="BTCUSDT",
+                timeframe="5m",
+                open=70250.10,
+                high=70420.00,
+                low=70180.40,
+                close=70390.20,
+                volume=123.45,
+                quote_volume=8670000.10,
+                source="binance_spot",
+                bar_open_time=datetime(2024, 4, 1, 7, 0, tzinfo=UTC),
+                bar_close_time=datetime(2024, 4, 1, 7, 14, 59, 999000, tzinfo=UTC),
+            ),
         ]
+
+    def set_http_client(self, client: object | None) -> None:
+        return
 
 
 def test_ingestion_run_route_executes_storage_backed_cycle(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings,
 ) -> None:
     service = IngestionCycleService(
@@ -212,9 +223,10 @@ def test_ingestion_run_route_executes_storage_backed_cycle(
         context_manager=ContextConnectorManager(
             [DemoNewsConnector(), DemoSentimentConnector()],
         ),
+        session_factory=sqlite_session_factory,
     )
 
-    payload = asyncio.run(run_ingestion_cycle(db_session, service))
+    payload = asyncio.run(run_ingestion_cycle(service))
 
     assert payload["market_records_written"] == 4
     assert payload["news_records_written"] == 1

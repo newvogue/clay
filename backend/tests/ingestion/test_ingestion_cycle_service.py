@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -43,28 +44,46 @@ from clay.freshness.models import FreshnessResult
 from clay.ingestion.context.connectors.demo_news import DemoNewsConnector
 from clay.ingestion.context.connectors.demo_sentiment import DemoSentimentConnector
 from clay.ingestion.context.manager import ContextConnectorManager
+from clay.ingestion.market.models import NormalizedMarketBar
 from clay.ingestion.market.service import MarketIngestionService
-from clay.ingestion.service import IngestionCycleBusy, IngestionCycleService
+from clay.ingestion.service import (
+    IngestionCycleBusy,
+    IngestionCycleService,
+    IngestionRunSummary,
+    _CollectedData,
+)
 from clay.settings.ingestion import IngestionSettings
 
 
 class _FakeBinanceClient:
-    """Returns a single deterministic kline per call (no real network)."""
+    """Returns a single deterministic kline per call (no real network).
+
+    E1: conforms to ``MarketDataClient`` protocol — returns
+    ``NormalizedMarketBar`` instead of raw arrays.
+    """
+
+    source: str = "test"
 
     async def fetch_klines(self, symbol: str, interval: str, limit: int = 200):
-        del symbol, interval, limit
+        del limit
         return [
-            [
-                1711954800000,
-                "70250.10",
-                "70420.00",
-                "70180.40",
-                "70390.20",
-                "123.45",
-                1711955699999,
-                "8670000.10",
-            ],
+            NormalizedMarketBar(
+                symbol=symbol or "BTCUSDT",
+                timeframe=interval or "5m",
+                open=70250.10,
+                high=70420.00,
+                low=70180.40,
+                close=70390.20,
+                volume=123.45,
+                quote_volume=8670000.10,
+                source="binance_spot",
+                bar_open_time=datetime(2024, 4, 1, 7, 0, tzinfo=UTC),
+                bar_close_time=datetime(2024, 4, 1, 7, 14, 59, 999000, tzinfo=UTC),
+            ),
         ]
+
+    def set_http_client(self, client: object | None) -> None:
+        return
 
 
 def _read_audit_events(audit_writer: AuditWriter) -> list[dict[str, Any]]:
@@ -89,17 +108,17 @@ def _drain_event_bus(event_bus: EventBus) -> list[tuple[str, dict[str, Any]]]:
 
 
 def _build_service(
-    tmp_path: Path,
+    sqlite_session_factory: Any,
     sqlite_settings: IngestionSettings,
     audit_writer: AuditWriter,
     event_bus: EventBus,
 ) -> IngestionCycleService:
     """Build an ``IngestionCycleService`` wired to real audit_writer + event_bus.
 
-    Uses the SQLite-injected ``IngestionSettings`` so the SQLite
-    session/DB are the ones the fixture's ``db_session`` is bound to.
-    The fake binance client + demo connectors are enough to drive a
-    full market+context cycle (4 market bars + 1 news + 1 sentiment).
+    C3: ``session_factory`` is required — the service opens **its own**
+    ``Session`` inside ``_persist`` (worker thread). The fake binance
+    client + demo connectors are enough to drive a full market+context
+    cycle (4 market bars + 1 news + 1 sentiment).
     """
     return IngestionCycleService(
         settings=sqlite_settings,
@@ -107,6 +126,7 @@ def _build_service(
         context_manager=ContextConnectorManager(
             [DemoNewsConnector(), DemoSentimentConnector()],
         ),
+        session_factory=sqlite_session_factory,
         audit_writer=audit_writer,
         event_bus=event_bus,
     )
@@ -114,17 +134,21 @@ def _build_service(
 
 @pytest.mark.anyio
 async def test_run_once_default_emits_audit_and_bus(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings: IngestionSettings,
     tmp_path: Path,
 ) -> None:
-    """``run_once(session)`` (default ``emit=True``) writes audit+bus once."""
+    """``run_once(emit=True)`` (default) writes audit+bus once.
+
+    C3: session lifecycle is owned by the service —
+    the caller no longer provides a ``session``.
+    """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
-    event_bus.subscribe()  # so _drain_event_bus sees the published event
-    service = _build_service(tmp_path, sqlite_settings, audit_writer, event_bus)
+    event_bus.subscribe()
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
 
-    summary = await service.run_once(db_session)
+    summary = await service.run_once(emit=True)
 
     # DB writes happen.
     assert summary.market_records_written == 4
@@ -146,28 +170,32 @@ async def test_run_once_default_emits_audit_and_bus(
 
 @pytest.mark.anyio
 async def test_run_once_emit_false_skips_audit_and_bus(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings: IngestionSettings,
     tmp_path: Path,
 ) -> None:
-    """``run_once(session, emit=False)`` skips audit+bus, DB writes persist.
+    """``run_once(emit=False)`` skips audit+bus, DB writes persist.
 
     The scheduler-driven path: observability is the job's
     transition-only emit, not the per-tick flood. DB writes (market
     bars + freshness statuses) still happen — the cycle is the
     meaning of the job.
+
+    C3: verify DB writes via a **separate** session — the service
+    owns its own session inside ``_persist`` (worker thread).
     """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
     event_bus.subscribe()
-    service = _build_service(tmp_path, sqlite_settings, audit_writer, event_bus)
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
 
-    summary = await service.run_once(db_session, emit=False)
+    summary = await service.run_once(emit=False)
 
-    # DB writes still happen.
+    # DB writes still happen — verify via separate session.
     assert summary.market_records_written == 4
-    market_repo = MarketRepository(db_session)
-    assert len(market_repo.list_freshness_statuses()) == 4
+    with sqlite_session_factory() as session:
+        market_repo = MarketRepository(session)
+        assert len(market_repo.list_freshness_statuses()) == 4
 
     # NO audit, NO bus emission.
     assert _read_audit_events(audit_writer) == []
@@ -176,7 +204,7 @@ async def test_run_once_emit_false_skips_audit_and_bus(
 
 @pytest.mark.anyio
 async def test_run_once_raises_busy_when_lock_held(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings: IngestionSettings,
     tmp_path: Path,
 ) -> None:
@@ -187,30 +215,32 @@ async def test_run_once_raises_busy_when_lock_held(
     raises ``IngestionCycleBusy`` without entering the pipeline.
     The lock is held on the test side and released after the
     assertion so the test coroutine does not deadlock.
+
+    C3: ``run_once`` no longer takes a session parameter.
     """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
-    service = _build_service(tmp_path, sqlite_settings, audit_writer, event_bus)
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
 
     # Manually acquire the lock to put the service in a "busy" state.
     await service._lock.acquire()  # noqa: SLF001 (intentional — test the lock)
     try:
         with pytest.raises(IngestionCycleBusy, match="already running"):
-            await service.run_once(db_session)
+            await service.run_once()
         # is_running is the fast non-blocking check.
         assert service.is_running is True
     finally:
         service._lock.release()  # noqa: SLF001
 
     # Once released, a normal call goes through.
-    summary = await service.run_once(db_session)
+    summary = await service.run_once()
     assert summary.market_records_written == 4
     assert service.is_running is False
 
 
 @pytest.mark.anyio
 async def test_freshness_state_transitions_increment_only_on_actual_change(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings: IngestionSettings,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -234,7 +264,7 @@ async def test_freshness_state_transitions_increment_only_on_actual_change(
     """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
-    service = _build_service(tmp_path, sqlite_settings, audit_writer, event_bus)
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
 
     # Mutable state the fake evaluator closes over. Defaults to "fresh"
     # so the first run INSERTs all 4 records as "fresh".
@@ -255,12 +285,12 @@ async def test_freshness_state_transitions_increment_only_on_actual_change(
 
     # --- Run 1: INSERT, status = "fresh" → 4 transitions ---
     status_box["status"] = "fresh"
-    summary_1 = await service.run_once(db_session, emit=False)
+    summary_1 = await service.run_once(emit=False)
     assert summary_1.freshness_state_transitions == 4
     assert summary_1.freshness_updates_written == 4  # informational
 
     # --- Run 2: UPDATE same state, status still "fresh" → 0 transitions ---
-    summary_2 = await service.run_once(db_session, emit=False)
+    summary_2 = await service.run_once(emit=False)
     assert summary_2.freshness_state_transitions == 0, (
         "steady-state UPDATE must NOT increment transition counter "
         "(Поправка 2 anti-flood)"
@@ -269,14 +299,14 @@ async def test_freshness_state_transitions_increment_only_on_actual_change(
 
     # --- Run 3: UPDATE different state, status flips to "stale" → 4 transitions ---
     status_box["status"] = "stale"
-    summary_3 = await service.run_once(db_session, emit=False)
+    summary_3 = await service.run_once(emit=False)
     assert summary_3.freshness_state_transitions == 4
     assert summary_3.freshness_updates_written == 4
 
 
 @pytest.mark.anyio
 async def test_market_records_inserted_updated_split_correctly(
-    db_session,
+    sqlite_session_factory,
     sqlite_settings: IngestionSettings,
     tmp_path: Path,
 ) -> None:
@@ -286,23 +316,63 @@ async def test_market_records_inserted_updated_split_correctly(
     (``= inserted + updated``) so the pre-B5 ``assert ... == 4``
     contract is preserved; the new ``market_records_inserted`` and
     ``market_records_updated`` fields expose the split.
+
+    C3: DB verification via separate session.
     """
     audit_writer = AuditWriter(tmp_path / "state")
     event_bus = EventBus()
-    service = _build_service(tmp_path, sqlite_settings, audit_writer, event_bus)
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
 
     # First run — 4 new bars, all INSERTed.
-    summary_1 = await service.run_once(db_session, emit=False)
+    summary_1 = await service.run_once(emit=False)
     assert summary_1.market_records_inserted == 4
     assert summary_1.market_records_updated == 0
     assert summary_1.market_records_written == 4  # computed property
 
     # Second run — same bars, all UPDATEd.
-    summary_2 = await service.run_once(db_session, emit=False)
+    summary_2 = await service.run_once(emit=False)
     assert summary_2.market_records_inserted == 0
     assert summary_2.market_records_updated == 4
     assert summary_2.market_records_written == 4  # computed property
 
-    # And the pre-B5 contract is preserved.
-    market_repo = MarketRepository(db_session)
-    assert len(market_repo.list_latest_bars(limit=100)) == 4
+    # And the pre-B5 contract is preserved — verify via separate session.
+    with sqlite_session_factory() as session:
+        market_repo = MarketRepository(session)
+        assert len(market_repo.list_latest_bars(limit=100)) == 4
+
+
+@pytest.mark.anyio
+async def test_persist_runs_in_worker_thread(
+    sqlite_session_factory,
+    sqlite_settings: IngestionSettings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C3 acceptance: sync-DB persist runs in a **worker thread**, not the event loop.
+
+    Spies on ``IngestionCycleService._persist`` to capture the
+    thread identity and asserts it differs from the main (test)
+    coroutine's thread — proving ``asyncio.to_thread`` offloads
+    the DB work.
+    """
+    audit_writer = AuditWriter(tmp_path / "state")
+    event_bus = EventBus()
+    service = _build_service(sqlite_session_factory, sqlite_settings, audit_writer, event_bus)
+    main_thread = threading.get_ident()
+    persist_thread: list[object] = [None]
+
+    original = service._persist  # noqa: SLF001
+
+    def spy(collected: _CollectedData, started_at: datetime) -> IngestionRunSummary:
+        persist_thread[0] = threading.get_ident()
+        return original(collected, started_at)
+
+    monkeypatch.setattr(service, "_persist", spy)
+
+    await service.run_once(emit=False)
+
+    assert persist_thread[0] is not None, "persist was never called"
+    assert persist_thread[0] != main_thread, (
+        f"_persist ran on the event-loop thread ({main_thread}), "
+        f"expected a different (worker) thread"
+    )

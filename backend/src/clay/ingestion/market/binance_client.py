@@ -3,19 +3,28 @@ from typing import Any
 
 import httpx
 
+from clay.ingestion.market.models import NormalizedMarketBar
+from clay.ingestion.market.normalizer import normalize_kline_payload
+
 
 class BinanceSpotClient:
-    """Minimal REST client contract for Binance Spot market data."""
+    """Minimal REST client contract for Binance Spot market data.
+
+    E1: conforms to ``MarketDataClient`` protocol — normalizes raw
+    Binance kline arrays into ``NormalizedMarketBar`` internally.
+    """
 
     def __init__(
         self,
         base_url: str = "https://api.binance.com",
         timeout: float = 10.0,
         client: httpx.AsyncClient | None = None,
+        source: str = "binance_spot",
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client = client
+        self.source = source
 
     def set_http_client(self, client: httpx.AsyncClient | None) -> None:
         """Late-binding setter for the shared lifespan-owned client.
@@ -35,7 +44,17 @@ class BinanceSpotClient:
         symbol: str,
         interval: str,
         limit: int = 200,
-    ) -> Sequence[dict[str, Any]]:
+    ) -> list[NormalizedMarketBar]:
+        raw = await self._fetch_raw(symbol=symbol, interval=interval, limit=limit)
+        return [self._normalize_row(symbol, interval, row) for row in raw]
+
+    async def _fetch_raw(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 200,
+    ) -> list[list[Any]]:
+        """Raw HTTP fetch — returns unparsed Binance kline arrays."""
         if self._client is not None:
             response = await self._client.get(
                 f"{self.base_url}/api/v3/klines",
@@ -55,3 +74,27 @@ class BinanceSpotClient:
             response.raise_for_status()
             payload = response.json()
             return list(payload)
+
+    def _normalize_row(
+        self,
+        symbol: str,
+        interval: str,
+        row: Sequence[Any],
+    ) -> NormalizedMarketBar:
+        return normalize_kline_payload(
+            {
+                "symbol": symbol,
+                "interval": interval,
+                "kline": {
+                    "t": row[0],
+                    "o": row[1],
+                    "h": row[2],
+                    "l": row[3],
+                    "c": row[4],
+                    "v": row[5],
+                    "T": row[6],
+                    "q": row[7] if len(row) > 7 else None,
+                },
+            },
+            source=self.source,
+        )

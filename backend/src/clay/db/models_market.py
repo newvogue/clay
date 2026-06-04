@@ -22,7 +22,7 @@ class MarketBar(Base):
     close: Mapped[float] = mapped_column(Float)
     volume: Mapped[float] = mapped_column(Float)
     quote_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source: Mapped[str] = mapped_column(String(32), default="binance_spot")
+    source: Mapped[str] = mapped_column(String(32))
     bar_open_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         index=True,
@@ -46,7 +46,7 @@ class OrderBookSummary(Base):
         index=True,
         primary_key=True,
     )
-    source: Mapped[str] = mapped_column(String(32), default="binance_spot")
+    source: Mapped[str] = mapped_column(String(32))
 
 
 class MarketFreshnessStatus(Base):

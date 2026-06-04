@@ -1,22 +1,25 @@
-from collections.abc import Iterable, Sequence
-from typing import Any
+from collections.abc import Iterable
 
 import httpx
 
 from clay.db.repositories_market import MarketRepository
-from clay.ingestion.market.binance_client import BinanceSpotClient
 from clay.ingestion.market.models import NormalizedMarketBar
-from clay.ingestion.market.normalizer import normalize_kline_payload
+from clay.ingestion.market.protocol import MarketDataClient
 
 
 class MarketIngestionService:
-    """Coordinates market payload fetch and normalization."""
+    """Coordinates market payload fetch and normalization.
 
-    def __init__(self, client: BinanceSpotClient) -> None:
+    E1: depends on ``MarketDataClient`` protocol — any exchange
+    adapter conforming to the protocol can be wired in.
+    Normalization happens inside the adapter (not here).
+    """
+
+    def __init__(self, client: MarketDataClient) -> None:
         self.client = client
 
     def set_http_client(self, client: httpx.AsyncClient | None) -> None:
-        """Late-binding pass-through to the underlying ``BinanceSpotClient``.
+        """Late-binding pass-through to the underlying ``MarketDataClient``.
 
         C2 (Wave C pre-D hardening): this is the **real** inject path,
         not an optional helper. ``api/lifespan.py`` startup calls
@@ -25,7 +28,7 @@ class MarketIngestionService:
         singleton. ``ingestion_cycle_service`` (and therefore the
         scheduler-job and the ``POST /ingestion/run`` route) reach the
         same client through this single ``MarketIngestionService`` →
-        ``BinanceSpotClient`` chain — no ``app.state.httpx_client``
+        ``MarketDataClient`` chain — no ``app.state.httpx_client``
         needed.
         """
         self.client.set_http_client(client)
@@ -36,8 +39,7 @@ class MarketIngestionService:
         interval: str,
         limit: int = 200,
     ) -> list[NormalizedMarketBar]:
-        payloads = await self.client.fetch_klines(symbol=symbol, interval=interval, limit=limit)
-        return [self._normalize_kline_row(symbol, interval, row) for row in payloads]
+        return await self.client.fetch_klines(symbol=symbol, interval=interval, limit=limit)
 
     def persist_bars(
         self,
@@ -47,27 +49,4 @@ class MarketIngestionService:
         """Persist bars; return ``(inserted, updated)`` (B5 counter split)."""
         return repository.upsert_market_bars(
             [bar.model_dump(mode="python") for bar in bars],
-        )
-
-    def _normalize_kline_row(
-        self,
-        symbol: str,
-        interval: str,
-        row: Sequence[Any],
-    ) -> NormalizedMarketBar:
-        return normalize_kline_payload(
-            {
-                "symbol": symbol,
-                "interval": interval,
-                "kline": {
-                    "t": row[0],
-                    "o": row[1],
-                    "h": row[2],
-                    "l": row[3],
-                    "c": row[4],
-                    "v": row[5],
-                    "T": row[6],
-                    "q": row[7] if len(row) > 7 else None,
-                },
-            },
         )

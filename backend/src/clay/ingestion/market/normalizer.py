@@ -4,7 +4,10 @@ from typing import Any
 from clay.ingestion.market.models import NormalizedMarketBar
 
 
-def normalize_kline_payload(payload: dict[str, Any]) -> NormalizedMarketBar:
+def normalize_kline_payload(
+    payload: dict[str, Any],
+    source: str = "binance_spot",
+) -> NormalizedMarketBar:
     kline = payload["kline"]
     return NormalizedMarketBar(
         symbol=str(payload["symbol"]),
@@ -15,7 +18,7 @@ def normalize_kline_payload(payload: dict[str, Any]) -> NormalizedMarketBar:
         close=float(kline["c"]),
         volume=float(kline["v"]),
         quote_volume=float(kline["q"]) if kline.get("q") is not None else None,
-        source="binance_spot",
+        source=source,
         bar_open_time=datetime.fromtimestamp(kline["t"] / 1000, tz=UTC),
         bar_close_time=datetime.fromtimestamp(kline["T"] / 1000, tz=UTC),
     )
