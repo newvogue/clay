@@ -28,6 +28,7 @@ from sqlalchemy.orm import sessionmaker
 
 from clay.ai_control.service import AIControlService
 from clay.audit.writer import AuditWriter
+from clay.settings.ingestion import IngestionSettings
 from clay.config.loader import ConfigLoader
 from clay.config.paths import XdgPaths
 from clay.control_center.service import ControlCenterService
@@ -146,6 +147,7 @@ def build_service(
         supervisor=supervisor,
         config_loader=config_loader,
         audit_writer=audit_writer,
+        ingestion_settings=IngestionSettings(),
     )
 
     return ReliabilityService(

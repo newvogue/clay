@@ -9,6 +9,7 @@ from clay.api.routes.shortlist import get_shortlist_metrics
 from clay.db.repositories_context import ContextRepository
 from clay.db.repositories_market import MarketRepository
 from clay.db.repositories_ops import OpsRepository
+from clay.settings.ingestion import IngestionSettings
 from clay.ingestion.context.connectors.demo_news import DemoNewsConnector
 from clay.ingestion.context.connectors.demo_sentiment import DemoSentimentConnector
 from clay.ingestion.context.manager import ContextConnectorManager
@@ -28,7 +29,7 @@ def _market_service(client: Any, settings: Any) -> MarketIngestionService:
 
 
 def test_ingestion_health_route_returns_market_and_context_sections(
-    db_session,
+    db_session, sqlite_settings,
 ) -> None:
     now = datetime.now(UTC)
     market_repository = MarketRepository(db_session)
@@ -91,7 +92,7 @@ def test_ingestion_health_route_returns_market_and_context_sections(
     )
     db_session.commit()
 
-    payload = asyncio.run(get_ingestion_health(db_session))
+    payload = asyncio.run(get_ingestion_health(db_session, sqlite_settings))
 
     assert "market" in payload
     assert "context" in payload
@@ -176,7 +177,7 @@ def test_storage_backed_read_routes_return_seeded_data(
 
 
 def test_ingestion_health_recomputes_market_staleness_from_latest_bar_time(
-    db_session,
+    db_session, sqlite_settings,
 ) -> None:
     now = datetime.now(UTC)
     market_repository = MarketRepository(db_session)
@@ -192,12 +193,77 @@ def test_ingestion_health_recomputes_market_staleness_from_latest_bar_time(
     )
     db_session.commit()
 
-    payload = asyncio.run(get_ingestion_health(db_session))
+    payload = asyncio.run(get_ingestion_health(db_session, sqlite_settings))
 
     assert payload["market"]["status"] == "stale"
     assert payload["market"]["blocks_active_trading"] is True
     assert payload["market"]["items"][0]["status"] == "stale"
     assert "delta=6 days" in payload["market"]["items"][0]["reason"]
+
+
+def test_ingestion_health_tight_threshold_flips_fresh_to_stale(
+    db_session,
+) -> None:
+    tight_settings = IngestionSettings(
+        database_url="sqlite+pysqlite://",  # not used, db_session already open
+        market_freshness_5m_minutes=1,
+        market_freshness_15m_minutes=1,
+        market_freshness_1h_minutes=1,
+    )
+    now = datetime.now(UTC)
+    market_repo = MarketRepository(db_session)
+    market_repo.upsert_freshness_status(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        source="binance_spot",
+        freshness_state="fresh",
+        evaluated_at=now - timedelta(minutes=6),
+        latest_bar_open_time=now - timedelta(minutes=6),
+        is_stale=False,
+    )
+    db_session.commit()
+
+    payload = asyncio.run(get_ingestion_health(db_session, tight_settings))
+
+    assert payload["market"]["status"] == "stale"
+    assert payload["market"]["blocks_active_trading"] is True
+    assert payload["market"]["items"][0]["status"] == "stale"
+
+
+def test_ingestion_health_context_threshold_flips_fresh_to_degraded(
+    db_session,
+) -> None:
+    tight_settings = IngestionSettings(
+        database_url="sqlite+pysqlite://",
+        context_freshness_news_hours=0,
+        context_freshness_sentiment_hours=0,
+    )
+    now = datetime.now(UTC)
+    context_repo = ContextRepository(db_session)
+    context_repo.store_news_items([
+        {
+            "source_name": "demo_news_feed",
+            "headline": "old news",
+            "summary": "Published 1 hour ago",
+            "published_at": now - timedelta(hours=1),
+            "symbol": "BTCUSDT",
+            "source_url": "https://example.invalid/news/old",
+        },
+    ])
+    context_repo.store_sentiment_snapshots([
+        {
+            "source_name": "demo_sentiment_feed",
+            "symbol": "BTCUSDT",
+            "sentiment_label": "bullish",
+            "sentiment_score": 0.68,
+            "captured_at": now - timedelta(hours=1),
+        },
+    ])
+    db_session.commit()
+
+    payload = asyncio.run(get_ingestion_health(db_session, tight_settings))
+
+    assert payload["context"]["status"] == "degraded"
 
 
 class FakeBinanceClient:

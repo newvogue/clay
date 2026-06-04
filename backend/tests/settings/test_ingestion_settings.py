@@ -9,6 +9,8 @@ value (literal → ``settings.<field>``).
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from clay.settings.ingestion import IngestionSettings
 from clay.settings.scheduler import SchedulerSettings
 
@@ -66,6 +68,43 @@ class TestIngestionSettingsOverride:
     def test_override_context_freshness_news(self, monkeypatch) -> None:
         monkeypatch.setenv("CLAY_CONTEXT_FRESHNESS_NEWS_HOURS", "12")
         assert IngestionSettings().context_freshness_news_hours == 12
+
+
+class TestFreshnessThresholdsMethods:
+    def test_market_thresholds_defaults(self) -> None:
+        t = IngestionSettings().market_freshness_thresholds()
+        assert t == {
+            "5m": timedelta(minutes=10),
+            "15m": timedelta(minutes=25),
+            "1h": timedelta(minutes=80),
+        }
+
+    def test_context_thresholds_defaults(self) -> None:
+        t = IngestionSettings().context_freshness_thresholds()
+        assert t == {
+            "news": timedelta(hours=8),
+            "sentiment": timedelta(hours=4),
+        }
+
+    def test_market_thresholds_reflect_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLAY_MARKET_FRESHNESS_5M_MINUTES", "1")
+        monkeypatch.setenv("CLAY_MARKET_FRESHNESS_15M_MINUTES", "2")
+        monkeypatch.setenv("CLAY_MARKET_FRESHNESS_1H_MINUTES", "3")
+        t = IngestionSettings().market_freshness_thresholds()
+        assert t == {
+            "5m": timedelta(minutes=1),
+            "15m": timedelta(minutes=2),
+            "1h": timedelta(minutes=3),
+        }
+
+    def test_context_thresholds_reflect_env_override(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLAY_CONTEXT_FRESHNESS_NEWS_HOURS", "1")
+        monkeypatch.setenv("CLAY_CONTEXT_FRESHNESS_SENTIMENT_HOURS", "2")
+        t = IngestionSettings().context_freshness_thresholds()
+        assert t == {
+            "news": timedelta(hours=1),
+            "sentiment": timedelta(hours=2),
+        }
 
 
 class TestSettingsExports:

@@ -22,6 +22,7 @@ from clay.preflight.service import PreflightService
 from clay.reliability.service import ReliabilityService
 from clay.runtime.manager import RuntimeManager
 from clay.services.models import ServiceCriticality, ServiceStatus
+from clay.settings.ingestion import IngestionSettings
 from clay.services.registry import ServiceRegistry
 from clay.services.supervisor import ProcessSupervisor
 from clay.session_control.service import SessionControlService
@@ -124,6 +125,7 @@ def build_reliability_bundle(tmp_path: Path) -> dict[str, object]:
         supervisor=supervisor,
         config_loader=config_loader,
         audit_writer=audit_writer,
+        ingestion_settings=IngestionSettings(),
     )
     reliability_service = ReliabilityService(
         control_center_service=control_center_service,

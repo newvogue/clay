@@ -202,6 +202,7 @@ def build_services(
         supervisor=supervisor,
         config_loader=config_loader,
         audit_writer=audit_writer,
+        ingestion_settings=ingestion_settings,
     )
     ai_control_service = AIControlService(
         runtime_manager=runtime_manager,

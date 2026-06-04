@@ -30,6 +30,7 @@ from clay.freshness.evaluator import (
 from clay.preflight.models import PreflightResult
 from clay.preflight.service import PreflightService
 from clay.runtime.manager import RuntimeManager
+from clay.settings.ingestion import IngestionSettings
 from clay.runtime.states import RuntimeState
 from clay.services.registry import ServiceRegistry
 from clay.services.supervisor import ProcessSupervisor
@@ -55,6 +56,7 @@ class ControlCenterService:
         supervisor: ProcessSupervisor,
         config_loader: ConfigLoader,
         audit_writer: AuditWriter,
+        ingestion_settings: IngestionSettings,
     ) -> None:
         self.runtime_manager = runtime_manager
         self.preflight_service = preflight_service
@@ -62,6 +64,7 @@ class ControlCenterService:
         self.supervisor = supervisor
         self.config_loader = config_loader
         self.audit_writer = audit_writer
+        self.ingestion_settings = ingestion_settings
 
     def build_snapshot(self, session: Session) -> ControlCenterSnapshot:
         now = datetime.now(UTC)
@@ -147,6 +150,9 @@ class ControlCenterService:
         context_repo = ContextRepository(session)
         ops_repo = OpsRepository(session)
 
+        market_thresholds = self.ingestion_settings.market_freshness_thresholds()
+        context_thresholds = self.ingestion_settings.context_freshness_thresholds()
+
         market_items: list[MarketFreshnessItem] = []
         market_statuses: list[str] = []
         blocks_active_trading = False
@@ -157,6 +163,7 @@ class ControlCenterService:
                 timeframe=row.timeframe,
                 latest_bar_open_time=row.latest_bar_open_time,
                 now=now,
+                market_thresholds=market_thresholds,
             )
             market_items.append(
                 MarketFreshnessItem(
@@ -182,11 +189,13 @@ class ControlCenterService:
             stream_name="news",
             last_received_at=latest_news[0].published_at if latest_news else None,
             now=now,
+            context_thresholds=context_thresholds,
         )
         sentiment_freshness = evaluate_context_freshness(
             stream_name="sentiment",
             last_received_at=latest_sentiment[0].captured_at if latest_sentiment else None,
             now=now,
+            context_thresholds=context_thresholds,
         )
 
         connector_rows = ops_repo.latest_connector_statuses()

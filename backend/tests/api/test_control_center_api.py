@@ -15,9 +15,13 @@ from clay.runtime.manager import RuntimeManager
 from clay.services.models import ServiceCriticality, ServiceStatus
 from clay.services.registry import ServiceRegistry
 from clay.services.supervisor import ProcessSupervisor
+from clay.settings.ingestion import IngestionSettings
 
 
-def build_control_center_service(tmp_path: Path) -> ControlCenterService:
+def build_control_center_service(
+    tmp_path: Path,
+    ingestion_settings: IngestionSettings | None = None,
+) -> ControlCenterService:
     registry = ServiceRegistry()
     registry.register(
         service_id="control-api",
@@ -59,6 +63,7 @@ def build_control_center_service(tmp_path: Path) -> ControlCenterService:
         supervisor=supervisor,
         config_loader=config_loader,
         audit_writer=audit_writer,
+        ingestion_settings=ingestion_settings or IngestionSettings(),
     )
 
 
@@ -165,6 +170,35 @@ def test_control_center_recomputes_stale_market_freshness(
             freshness_state="fresh",
             evaluated_at=now - timedelta(days=6),
             latest_bar_open_time=now - timedelta(days=6),
+            is_stale=False,
+        )
+        session.commit()
+        payload = asyncio.run(get_control_center_overview(session, service))
+
+    assert payload["ingestion"]["market_status"] == "stale"
+    assert payload["ingestion"]["blocks_active_trading"] is True
+    assert payload["ingestion"]["market_items"][0]["status"] == "stale"
+
+
+def test_control_center_tight_threshold_flips_fresh_to_stale(
+    sqlite_session_factory,
+    tmp_path: Path,
+) -> None:
+    tight_settings = IngestionSettings(market_freshness_5m_minutes=1)
+    service = build_control_center_service(
+        tmp_path, ingestion_settings=tight_settings,
+    )
+    now = datetime.now(UTC)
+
+    with sqlite_session_factory() as session:
+        market_repo = MarketRepository(session)
+        market_repo.upsert_freshness_status(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            source="binance_spot",
+            freshness_state="fresh",
+            evaluated_at=now - timedelta(minutes=6),
+            latest_bar_open_time=now - timedelta(minutes=6),
             is_stale=False,
         )
         session.commit()

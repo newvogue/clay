@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,3 +43,16 @@ class IngestionSettings(BaseSettings):
     market_freshness_1h_minutes: int = 80
     context_freshness_news_hours: int = 8
     context_freshness_sentiment_hours: int = 4
+
+    def market_freshness_thresholds(self) -> dict[str, timedelta]:
+        return {
+            "5m": timedelta(minutes=self.market_freshness_5m_minutes),
+            "15m": timedelta(minutes=self.market_freshness_15m_minutes),
+            "1h": timedelta(minutes=self.market_freshness_1h_minutes),
+        }
+
+    def context_freshness_thresholds(self) -> dict[str, timedelta]:
+        return {
+            "news": timedelta(hours=self.context_freshness_news_hours),
+            "sentiment": timedelta(hours=self.context_freshness_sentiment_hours),
+        }

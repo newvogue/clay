@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from clay.api.dependencies import get_db_session, get_ingestion_cycle_service
+from clay.api.dependencies import get_db_session, get_ingestion_cycle_service, get_ingestion_settings
 from clay.db.repositories_context import ContextRepository
 from clay.db.repositories_market import MarketRepository
 from clay.db.repositories_ops import OpsRepository
@@ -14,6 +14,7 @@ from clay.freshness.evaluator import (
     resolve_market_freshness_status,
 )
 from clay.ingestion.service import IngestionCycleBusy, IngestionCycleService
+from clay.settings.ingestion import IngestionSettings
 
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -22,8 +23,11 @@ router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 @router.get("/health")
 async def get_ingestion_health(
     session: Annotated[Session, Depends(get_db_session)],
+    settings: Annotated[IngestionSettings, Depends(get_ingestion_settings)],
 ) -> dict[str, object]:
     now = datetime.now(UTC)
+    market_thresholds = settings.market_freshness_thresholds()
+    context_thresholds = settings.context_freshness_thresholds()
     market_repo = MarketRepository(session)
     context_repo = ContextRepository(session)
     ops_repo = OpsRepository(session)
@@ -38,6 +42,7 @@ async def get_ingestion_health(
             timeframe=row.timeframe,
             latest_bar_open_time=row.latest_bar_open_time,
             now=now,
+            market_thresholds=market_thresholds,
         )
         market_items.append(
             {
@@ -63,11 +68,13 @@ async def get_ingestion_health(
         stream_name="news",
         last_received_at=latest_news[0].published_at if latest_news else None,
         now=now,
+        context_thresholds=context_thresholds,
     )
     sentiment = evaluate_context_freshness(
         stream_name="sentiment",
         last_received_at=latest_sentiment[0].captured_at if latest_sentiment else None,
         now=now,
+        context_thresholds=context_thresholds,
     )
     connector_statuses = ops_repo.latest_connector_statuses()
     context_status = "fresh"
