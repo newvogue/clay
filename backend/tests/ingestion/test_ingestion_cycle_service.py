@@ -197,6 +197,14 @@ async def test_run_once_emit_false_skips_audit_and_bus(
         market_repo = MarketRepository(session)
         assert len(market_repo.list_freshness_statuses()) == 4
 
+        # E2: freshness records carry source from the data path (latest_bar.source),
+        # not from a hardcoded literal.
+        from clay.db.models_market import MarketFreshnessStatus
+        from sqlalchemy import select
+        freshness_rows = session.scalars(select(MarketFreshnessStatus)).all()
+        for row in freshness_rows:
+            assert row.source == "binance_spot"
+
     # NO audit, NO bus emission.
     assert _read_audit_events(audit_writer) == []
     assert _drain_event_bus(event_bus) == []

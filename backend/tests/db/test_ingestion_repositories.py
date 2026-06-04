@@ -1,8 +1,72 @@
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
+
+from clay.db.models_market import MarketBar, MarketFreshnessStatus
 from clay.db.repositories_context import ContextRepository
 from clay.db.repositories_market import MarketRepository
 from clay.db.repositories_ops import OpsRepository
+
+
+def test_source_unique_constraint_allows_different_sources(db_session) -> None:
+    """E2: source is part of UC — rows with same (symbol,timeframe,bar_open_time)
+    but different source coexist (multi-exchange readiness)."""
+    repository = MarketRepository(db_session)
+    observed_at = datetime(2026, 4, 16, 10, 0, tzinfo=UTC)
+
+    # Bar from Binance
+    written_1 = repository.upsert_market_bars([
+        {
+            "symbol": "BTCUSDT", "timeframe": "15m",
+            "open": 70200.0, "high": 70400.0, "low": 70100.0,
+            "close": 70350.0, "volume": 120.0, "quote_volume": 8440000.0,
+            "source": "binance_spot",
+            "bar_open_time": observed_at, "bar_close_time": observed_at,
+        },
+    ])
+
+    # Bar with same key but different source (e.g. Bybit)
+    written_2 = repository.upsert_market_bars([
+        {
+            "symbol": "BTCUSDT", "timeframe": "15m",
+            "open": 70210.0, "high": 70410.0, "low": 70120.0,
+            "close": 70360.0, "volume": 130.0, "quote_volume": 8550000.0,
+            "source": "bybit_spot",
+            "bar_open_time": observed_at, "bar_close_time": observed_at,
+        },
+    ])
+    db_session.commit()
+
+    assert written_1 == (1, 0)
+    assert written_2 == (1, 0)
+
+    count = db_session.scalar(select(func.count(MarketBar.id)))
+    assert count == 2  # both rows coexist
+
+
+def test_freshness_status_stores_source(db_session) -> None:
+    """E2: freshness_status carries source on both success and failure paths."""
+    repository = MarketRepository(db_session)
+    observed_at = datetime(2026, 4, 16, 10, 0, tzinfo=UTC)
+
+    repository.upsert_freshness_status(
+        symbol="BTCUSDT", timeframe="15m",
+        source="binance_spot",
+        freshness_state="fresh", evaluated_at=observed_at,
+        latest_bar_open_time=observed_at, is_stale=False,
+    )
+    repository.upsert_freshness_status(
+        symbol="BTCUSDT", timeframe="15m",
+        source="bybit_spot",
+        freshness_state="unknown", evaluated_at=observed_at,
+        latest_bar_open_time=None, is_stale=True,
+    )
+    db_session.commit()
+
+    rows = db_session.scalars(select(MarketFreshnessStatus)).all()
+    assert len(rows) == 2
+    assert {r.source for r in rows} == {"binance_spot", "bybit_spot"}
+    assert rows[0].freshness_state in ("fresh", "unknown")
 
 
 def test_market_repository_persists_bars_and_freshness(db_session) -> None:
@@ -29,6 +93,7 @@ def test_market_repository_persists_bars_and_freshness(db_session) -> None:
     repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=observed_at,
         latest_bar_open_time=observed_at,

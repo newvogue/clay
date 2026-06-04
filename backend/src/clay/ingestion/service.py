@@ -375,6 +375,7 @@ class IngestionCycleService:
                 )
                 market_repo.upsert_freshness_status(
                     symbol=batch.symbol, timeframe=batch.timeframe,
+                    source=self.market_service.client.source,
                     freshness_state="unknown", evaluated_at=observed_at,
                     latest_bar_open_time=None, is_stale=True,
                 )
@@ -399,6 +400,7 @@ class IngestionCycleService:
             )
             state_changed = market_repo.upsert_freshness_status(
                 symbol=batch.symbol, timeframe=batch.timeframe,
+                source=latest_bar.source,
                 freshness_state=freshness.status,
                 evaluated_at=freshness.observed_at,
                 latest_bar_open_time=latest_bar.bar_open_time,

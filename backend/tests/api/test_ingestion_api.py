@@ -43,6 +43,7 @@ def test_ingestion_health_route_returns_market_and_context_sections(
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now,
         latest_bar_open_time=now - timedelta(minutes=15),
@@ -113,6 +114,7 @@ def test_storage_backed_read_routes_return_seeded_data(
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now,
         latest_bar_open_time=now - timedelta(minutes=15),
@@ -171,6 +173,7 @@ def test_ingestion_health_recomputes_market_staleness_from_latest_bar_time(
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now - timedelta(days=6),
         latest_bar_open_time=now - timedelta(days=6),

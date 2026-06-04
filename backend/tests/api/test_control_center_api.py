@@ -94,6 +94,7 @@ def test_control_center_overview_returns_operator_snapshot(
         market_repository.upsert_freshness_status(
             symbol="BTCUSDT",
             timeframe="15m",
+            source="binance_spot",
             freshness_state="fresh",
             evaluated_at=now,
             latest_bar_open_time=now - timedelta(minutes=15),
@@ -160,6 +161,7 @@ def test_control_center_recomputes_stale_market_freshness(
         market_repository.upsert_freshness_status(
             symbol="BTCUSDT",
             timeframe="15m",
+            source="binance_spot",
             freshness_state="fresh",
             evaluated_at=now - timedelta(days=6),
             latest_bar_open_time=now - timedelta(days=6),

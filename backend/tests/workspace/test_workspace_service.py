@@ -86,6 +86,7 @@ def test_workspace_snapshot_contains_required_e3_fields(db_session) -> None:
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now,
         latest_bar_open_time=now - timedelta(minutes=15),
@@ -94,6 +95,7 @@ def test_workspace_snapshot_contains_required_e3_fields(db_session) -> None:
     market_repository.upsert_freshness_status(
         symbol="ETHUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now,
         latest_bar_open_time=now - timedelta(minutes=15),
@@ -167,6 +169,7 @@ def test_workspace_focus_selection_updates_focus_source(db_session) -> None:
         market_repository.upsert_freshness_status(
             symbol=symbol,
             timeframe="15m",
+            source="binance_spot",
             freshness_state="fresh",
             evaluated_at=now,
             latest_bar_open_time=now - timedelta(minutes=15),
@@ -227,6 +230,7 @@ def test_workspace_switches_to_defensive_when_market_data_is_old(
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now - timedelta(days=6),
         latest_bar_open_time=now - timedelta(days=6),

@@ -28,6 +28,7 @@ class MarketRepository:
         for bar in bars:
             existing = self.session.scalar(
                 select(MarketBar).where(
+                    MarketBar.source == bar["source"],
                     MarketBar.symbol == bar["symbol"],
                     MarketBar.timeframe == bar["timeframe"],
                     MarketBar.bar_open_time == bar["bar_open_time"],
@@ -70,6 +71,7 @@ class MarketRepository:
     def upsert_freshness_status(
         self,
         *,
+        source: str,
         symbol: str,
         timeframe: str,
         freshness_state: str,
@@ -97,6 +99,7 @@ class MarketRepository:
         """
         existing = self.session.scalar(
             select(MarketFreshnessStatus).where(
+                MarketFreshnessStatus.source == source,
                 MarketFreshnessStatus.symbol == symbol,
                 MarketFreshnessStatus.timeframe == timeframe,
             ),
@@ -104,6 +107,7 @@ class MarketRepository:
         if existing is None:
             self.session.add(
                 MarketFreshnessStatus(
+                    source=source,
                     symbol=symbol,
                     timeframe=timeframe,
                     freshness_state=freshness_state,

@@ -108,8 +108,9 @@ def seed_demo_data(session) -> None:
         )
         market_repository.upsert_freshness_status(
             symbol=symbol,
-            timeframe="15m",
-            freshness_state="fresh",
+        timeframe="15m",
+        source="binance_spot",
+        freshness_state="fresh",
             evaluated_at=now,
             latest_bar_open_time=now - timedelta(minutes=15),
             is_stale=False,

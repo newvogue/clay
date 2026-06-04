@@ -33,6 +33,7 @@ def seed_signal_api_data(session) -> None:
     market_repository.upsert_freshness_status(
         symbol="BTCUSDT",
         timeframe="15m",
+        source="binance_spot",
         freshness_state="fresh",
         evaluated_at=now,
         latest_bar_open_time=now - timedelta(minutes=15),

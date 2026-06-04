@@ -9,7 +9,7 @@ from clay.db.base import Base
 class MarketBar(Base):
     __tablename__ = "market_bars"
     __table_args__ = (
-        UniqueConstraint("symbol", "timeframe", "bar_open_time", name="uq_market_bar"),
+        UniqueConstraint("source", "symbol", "timeframe", "bar_open_time", name="uq_market_bar"),
         {"schema": "market"},
     )
 
@@ -52,11 +52,12 @@ class OrderBookSummary(Base):
 class MarketFreshnessStatus(Base):
     __tablename__ = "market_freshness_status"
     __table_args__ = (
-        UniqueConstraint("symbol", "timeframe", name="uq_market_freshness_status"),
+        UniqueConstraint("source", "symbol", "timeframe", name="uq_market_freshness_status"),
         {"schema": "market"},
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32))
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     timeframe: Mapped[str] = mapped_column(String(8), index=True)
     freshness_state: Mapped[str] = mapped_column(String(32), index=True)
