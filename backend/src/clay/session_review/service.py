@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from collections import deque
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -79,7 +77,9 @@ class SessionReviewService:
                 model_version=model_version,
                 confidence_band=confidence_band,
             ),
-            filter_options=self._build_filter_options(reviewed_records, feedback_snapshots),
+            filter_options=self._build_filter_options(
+                reviewed_records, feedback_snapshots
+            ),
             records=filtered_records[:20],
             feedback=feedback_snapshots,
             audit=audit_events,
@@ -143,8 +143,14 @@ class SessionReviewService:
         return self.build_snapshot(session)
 
     def _decorate_record(self, record: DemoTradeRecord) -> ReviewedTradeRecord:
-        strategy_mode = "defensive" if record.operator_action in {"skipped", "off_signal"} else "momentum"
-        model_version = self.ai_control_service.assignments.get("chief-agent", "unknown")
+        strategy_mode = (
+            "defensive"
+            if record.operator_action in {"skipped", "off_signal"}
+            else "momentum"
+        )
+        model_version = self.ai_control_service.assignments.get(
+            "chief-agent", "unknown"
+        )
         confidence_band = self._confidence_band(record)
         return ReviewedTradeRecord(
             record_id=record.id,
@@ -192,7 +198,9 @@ class SessionReviewService:
         records: list[ReviewedTradeRecord],
         feedback: list[FeedbackItemSnapshot],
     ) -> SessionReviewSummary:
-        resolved = [record for record in records if record.outcome_status != "unresolved"]
+        resolved = [
+            record for record in records if record.outcome_status != "unresolved"
+        ]
         cumulative_pnl_pct = round(
             sum(record.pnl_pct or 0.0 for record in records),
             2,
@@ -208,7 +216,9 @@ class SessionReviewService:
             operator_message = "Some demo outcomes are still unresolved."
         else:
             status = "review_ready"
-            operator_message = "Session evidence is coherent enough for post-session review."
+            operator_message = (
+                "Session evidence is coherent enough for post-session review."
+            )
 
         return SessionReviewSummary(
             review_status=status,
@@ -228,16 +238,8 @@ class SessionReviewService:
         pairs = sorted({record.symbol for record in records})
         strategies = sorted({record.strategy_mode for record in records})
         model_versions = sorted(
-            {
-                record.model_version
-                for record in records
-                if record.model_version
-            }
-            | {
-                item.model_version
-                for item in feedback
-                if item.model_version
-            }
+            {record.model_version for record in records if record.model_version}
+            | {item.model_version for item in feedback if item.model_version}
         )
         confidence_bands = sorted({record.confidence_band for record in records})
         return SessionReviewFilterOptions(
@@ -264,21 +266,12 @@ class SessionReviewService:
         )
 
     def _read_audit_events(self, *, limit: int) -> list[NormalizedAuditEventSnapshot]:
-        if not self.audit_writer.path.exists():
-            return []
-        with self.audit_writer.path.open("r", encoding="utf-8") as handle:
-            lines = deque(handle, maxlen=limit)
+        events_raw = self.audit_writer.read_recent(limit=limit)
+        return [self._normalize_audit_event(payload) for payload in events_raw]
 
-        events: list[NormalizedAuditEventSnapshot] = []
-        for raw_line in reversed(lines):
-            raw_line = raw_line.strip()
-            if not raw_line:
-                continue
-            payload = json.loads(raw_line)
-            events.append(self._normalize_audit_event(payload))
-        return events
-
-    def _normalize_audit_event(self, payload: dict[str, object]) -> NormalizedAuditEventSnapshot:
+    def _normalize_audit_event(
+        self, payload: dict[str, object]
+    ) -> NormalizedAuditEventSnapshot:
         event_type = str(payload.get("event_type", "unknown"))
         event_payload = payload.get("payload", {})
         if not isinstance(event_payload, dict):
@@ -308,7 +301,9 @@ class SessionReviewService:
 
     def _build_explanation(self, event_type: str, payload: dict[str, object]) -> str:
         if event_type == "demo.trade.logged":
-            return f"Logged demo trade intent for {payload.get('symbol', 'unknown pair')}."
+            return (
+                f"Logged demo trade intent for {payload.get('symbol', 'unknown pair')}."
+            )
         if event_type == "demo.result.ingested":
             return f"Ingested demo result for {payload.get('symbol', 'unknown pair')}."
         if event_type == "review.feedback.captured":
