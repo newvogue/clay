@@ -1,4 +1,6 @@
-from fastapi import FastAPI
+import os
+import asyncio
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from clay.api.lifespan import lifespan
@@ -89,3 +91,15 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+# TEMP: G4 FIX-D live repro — удалить после G4 closed
+@app.post("/debug/bypass-scheduler-shutdown")
+async def debug_bypass_scheduler_shutdown(request: Request):
+    if not os.environ.get("CLAY_DEBUG_ENDPOINTS") == "1":
+        raise HTTPException(status_code=403, detail="Debug endpoints disabled")
+    scheduler = request.app.state.scheduler
+    if scheduler is None:
+        raise HTTPException(status_code=404, detail="Scheduler not found")
+    scheduler._apscheduler.pause()
+    return {"status": "scheduler paused"}
+# END TEMP
