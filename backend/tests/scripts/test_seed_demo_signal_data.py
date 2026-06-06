@@ -35,7 +35,10 @@ def test_seed_produces_eligible_ranked_signal(db_session) -> None:
         f"ranking_score {sol.ranking_score} should clear the weakening threshold"
     )
     assert cast(int, len(trackers.bar_keys)) == 50
-    assert cast(int, len(trackers.freshness_keys)) == 1
+    # One freshness row per configured timeframe (5m, 15m, 1h), so the
+    # ``build_shortlist_metrics`` iteration that overwrites stale rows
+    # still ends up with ``fresh`` for the symbol.
+    assert cast(int, len(trackers.freshness_keys)) == 3
 
 
 def test_seed_is_idempotent_and_cleanable(db_session) -> None:

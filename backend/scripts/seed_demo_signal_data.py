@@ -255,16 +255,31 @@ def seed(session: Session, symbols: list[str]) -> SeedTrackers:
             for b in bars
         )
 
-        market_repo.upsert_freshness_status(
-            source=SOURCE,
-            symbol=symbol,
-            timeframe=TIMEFRAME,
-            freshness_state="fresh",
-            evaluated_at=now,
-            latest_bar_open_time=cast(datetime, bars[-1]["bar_open_time"]),
-            is_stale=False,
-        )
-        trackers.freshness_keys.append((SOURCE, symbol, TIMEFRAME))
+        # Seed freshness_status for ALL configured timeframes, not just
+        # the priority 15m. ``build_shortlist_metrics`` iterates
+        # ``freshness_rows`` in ``(symbol ASC, timeframe ASC)`` order and
+        # the second-or-later row overwrites the first if it computes
+        # to a worse status. The old 1h/5m rows in the live DB have
+        # stale ``latest_bar_open_time`` (days old) and would flip the
+        # symbol to ``stale`` even if our 15m row is fresh. Writing a
+        # fresh row for each configured timeframe guarantees the
+        # final ``freshness_by_symbol[symbol]`` is ``fresh``.
+        for tf in TIMEFRAME_MINUTES:
+            market_repo.upsert_freshness_status(
+                source=SOURCE,
+                symbol=symbol,
+                timeframe=tf,
+                freshness_state="fresh",
+                evaluated_at=now,
+                # Set to the same anchor as the 15m bar's bar_open_time
+                # (or ``now - 1 min`` for timeframes where we did not
+                # seed bars). The on-read evaluation against each
+                # timeframe's threshold (5m=10min, 15m=25min, 1h=80min)
+                # passes in all cases.
+                latest_bar_open_time=now - timedelta(minutes=1),
+                is_stale=False,
+            )
+            trackers.freshness_keys.append((SOURCE, symbol, tf))
 
     for symbol in symbols:
         news = _news_payload(symbol, now)
