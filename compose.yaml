@@ -1,0 +1,25 @@
+# Clay DEPLOY-1 — TimescaleDB single-node (local test), порт 5433
+services:
+  timescaledb:
+    image: docker.io/timescale/timescaledb-ha:pg18.4-ts2.27.1
+    container_name: clay_timescaledb
+    environment:
+      POSTGRES_DB: clay
+      POSTGRES_USER: clay
+      POSTGRES_PASSWORD: ${CLAY_DB_PASSWORD:?set in .env}
+      PGDATA: /home/postgres/pgdata/data
+    ports:
+      - "127.0.0.1:5433:5432"   # host 5433 (live-postgres держит 5432); контейнер внутри 5432
+    volumes:
+      - clay_pgdata:/home/postgres/pgdata  # монтируем РОДИТЕЛЯ PGDATA
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clay -d clay"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  clay_pgdata:
+    external: true
