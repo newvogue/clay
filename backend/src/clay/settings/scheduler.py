@@ -68,6 +68,20 @@ class SchedulerSettings(BaseSettings):
     reliability_recheck_interval_seconds: int = 300
     ingestion_cycle_interval_seconds: int = 60
 
+    # 5b-ii.2b-ii: gate for the ``ai-agent-cycle`` job. ``False`` skips
+    # registration (default ``False`` — opt-in only). The controlled
+    # live-smoke (5b-iii) will flip it to ``True`` temporarily.
+    ai_agent_enabled: bool = False
+
+    # 5b-ii.2b-ii: interval for the ``ai-agent-cycle`` job. Default 300s
+    # (5 minutes) is appropriate for a config-review agent; the live-smoke
+    # will override to a shorter value for quick feedback.
+    ai_agent_interval_seconds: int = 300
+
+    # 5b-ii.2b-ii: role id that the ``ai-agent-cycle`` job resolves
+    # through ``ServiceModelResolver``. Default = ``"chief-agent"``.
+    ai_agent_role_id: str = "chief-agent"
+
     # MP1: interval for the ``ops-retention`` prune-job. Default 86400s
     # (once per day). Operator can override via
     # ``CLAY_SCHEDULER_OPS_RETENTION_INTERVAL_SECONDS``.

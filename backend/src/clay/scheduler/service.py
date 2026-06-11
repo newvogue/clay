@@ -71,6 +71,7 @@ from clay.events.bus import EventBus
 from clay.health.monitor import HealthMonitor
 from clay.ingestion.service import IngestionCycleService
 from clay.reliability.service import ReliabilityService
+from clay.scheduler.ai_agent_job import AIAgentCycleJob
 from clay.scheduler.jobs import (
     HealthTickJob,
     IngestionCycleJob,
@@ -112,6 +113,7 @@ class ClayScheduler:
     _RELIABILITY_RECHECK_JOB_ID = "reliability-recheck"
     _INGESTION_CYCLE_JOB_ID = "ingestion-cycle"
     _OPS_RETENTION_JOB_ID = "ops-retention"
+    _AI_AGENT_CYCLE_JOB_ID = "ai-agent-cycle"
 
     def __init__(
         self,
@@ -124,17 +126,18 @@ class ClayScheduler:
         reliability_service: ReliabilityService | None = None,
         session_factory: sessionmaker | None = None,
         ingestion_cycle_service: IngestionCycleService | None = None,
+        ai_agent_cycle_job: AIAgentCycleJob | None = None,
     ) -> None:
         """Construct the scheduler. B4 + B5 add optional kwargs.
 
-        ``reliability_service`` + ``session_factory`` (B4) and
-        ``ingestion_cycle_service`` (B5) are all **optional**
-        (default ``None``) so the B3a/B3b tests that construct
-        ``ClayScheduler`` without them keep passing — the
-        flag-gated ``add_*_job()`` calls are no-ops when the
-        matching dep is missing or the matching flag is
-        ``False``. Production (``api/lifespan.py``) always
-        passes all three.
+        ``reliability_service`` + ``session_factory`` (B4),
+        ``ingestion_cycle_service`` (B5), and ``ai_agent_cycle_job``
+        (5b-ii.2b-ii) are all **optional** (default ``None``) so
+        existing tests that construct ``ClayScheduler`` without
+        them keep passing — the flag-gated ``add_*_job()`` calls
+        are no-ops when the matching dep is missing or the matching
+        flag is ``False``. Production (``api/lifespan.py``) always
+        passes all four.
         """
         self._settings = settings
         self._registry = registry
@@ -144,6 +147,7 @@ class ClayScheduler:
         self._reliability_service = reliability_service
         self._session_factory = session_factory
         self._ingestion_cycle_service = ingestion_cycle_service
+        self._ai_agent_cycle_job = ai_agent_cycle_job
         self._apscheduler = AsyncIOScheduler(
             executors={
                 "default": ThreadPoolExecutor(max_workers=4),
@@ -201,6 +205,7 @@ class ClayScheduler:
         self.add_reliability_recheck_job()
         self.add_ops_retention_job()
         self.add_ingestion_cycle_job()
+        self.add_ai_agent_cycle_job()
         self._registry.update_status(self._SERVICE_ID, ServiceStatus.HEALTHY)
         jobs = [
             job_id
@@ -209,6 +214,7 @@ class ClayScheduler:
                 self._RELIABILITY_RECHECK_JOB_ID,
                 self._OPS_RETENTION_JOB_ID,
                 self._INGESTION_CYCLE_JOB_ID,
+                self._AI_AGENT_CYCLE_JOB_ID,
             )
             if self._apscheduler.get_job(job_id) is not None
         ]
@@ -424,6 +430,39 @@ class ClayScheduler:
             replace_existing=True,
             args=[job.run],
             kwargs={"on_error": job.on_error},
+        )
+
+    def add_ai_agent_cycle_job(self) -> None:
+        """Register the 5b-ii.2b-ii ``AIAgentCycleJob`` (flag-gated).
+
+        Two gates:
+
+        1. ``ai_agent_enabled`` flag (``False`` → silent skip).
+           Default is ``False`` (opt-in only).
+        2. ``ai_agent_cycle_job`` dep present. If ``None`` while the
+           flag is ``True``, emit a loud warning naming the missing
+           dep (dev/test misconfiguration; production always passes it).
+        """
+        if not self._settings.ai_agent_enabled:
+            return
+        if self._ai_agent_cycle_job is None:
+            logger.warning(
+                "clay.scheduler: ai_agent_enabled=True but "
+                "ai_agent_cycle_job is None — ai-agent-cycle job "
+                "NOT registered (misconfiguration)",
+            )
+            return
+        job = self._ai_agent_cycle_job
+        self._apscheduler.add_job(
+            func=self._arun_safely,
+            trigger="interval",
+            seconds=self._settings.ai_agent_interval_seconds,
+            id=self._AI_AGENT_CYCLE_JOB_ID,
+            executor="async",
+            max_instances=1,
+            coalesce=True,
+            replace_existing=True,
+            args=[job.run_once],
         )
 
     def _run_safely(

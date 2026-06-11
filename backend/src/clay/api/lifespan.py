@@ -54,6 +54,7 @@ from fastapi import FastAPI
 import httpx
 
 from clay.bootstrap import (
+    ai_control_service as _ai_control_service,
     audit_writer as _audit_writer,
     event_bus as _event_bus,
     health_monitor as _health_monitor,
@@ -65,7 +66,14 @@ from clay.bootstrap import (
     scheduler_settings,
     session_factory as _session_factory,
 )
+from clay.ai_control.runner import (
+    AgentRunner,
+    OllamaNativeClient,
+    ServiceModelResolver,
+)
+from clay.scheduler.ai_agent_job import AIAgentCycleJob
 from clay.scheduler.service import ClayScheduler
+from clay.settings.ollama import OllamaSettings
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +115,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
         )
         _market_ingestion_service.set_http_client(http_client)
+        ai_agent_cycle_job: AIAgentCycleJob | None = None
+        if scheduler_settings.ai_agent_enabled:
+            ollama_settings = OllamaSettings()
+            ollama_client = OllamaNativeClient.from_settings(ollama_settings)
+            resolver = ServiceModelResolver(_ai_control_service)
+            runner = AgentRunner(model_resolver=resolver, model_client=ollama_client)
+            ai_agent_cycle_job = AIAgentCycleJob(
+                runner=runner,
+                session_factory=_session_factory,
+                role_id=scheduler_settings.ai_agent_role_id,
+                ai_control_service=_ai_control_service,
+            )
         if scheduler_settings.enabled:
             scheduler = ClayScheduler(
                 settings=scheduler_settings,
@@ -117,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 reliability_service=_reliability_service,
                 session_factory=_session_factory,
                 ingestion_cycle_service=_ingestion_cycle_service,
+                ai_agent_cycle_job=ai_agent_cycle_job,
             )
             scheduler.start()
             app.state.scheduler = scheduler
