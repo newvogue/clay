@@ -1,18 +1,21 @@
-"""AgentRunner: orchestrates a single AI-control agent turn.
+"""AgentRunner + transport for a single AI-control agent turn.
 
-DEPLOY-5 / 5b-ii.1.
+DEPLOY-5:
+- 5b-ii.1: AgentRunner, ModelClient/ModelResolver protocols, OllamaNativeClient,
+  ModelResponse/AgentRunResult.
+- 5b-ii.2a: ServiceModelResolver (reads ai_control_service.assignments),
+  OllamaNativeClient.from_settings, fail-loud ModelUnavailableError.
 
 Transport decision:
-- LOCAL model (Gemma via Ollama) is called through the NATIVE Ollama API
-  (/api/chat), NOT the LiteLLM gateway: the OpenAI-compat /v1 endpoint returns
-  an empty `content` for Gemma's thinking template (Ollama issue #15288).
-  Native /api/chat cleanly separates `thinking` and `content`.
-- EXTERNAL providers (Gemini, 5b-iii) go through the LiteLLM gateway via the
-  committed LLMAdapter; both satisfy the ModelClient protocol.
-- Persistence and live wiring to ai_control_service.assignments[role_id] are
-  DEFERRED to 5b-ii.2. This module stays pure/offline-testable: model
-  resolution is injected (ModelResolver), governance stays in the service and
-  is NOT duplicated here; the HTTP transport is injected for tests.
+- LOCAL model (Gemma via Ollama) -> NATIVE Ollama API (/api/chat), NOT the
+  LiteLLM gateway: the OpenAI-compat /v1 endpoint returns empty `content` for
+  Gemma's thinking template (Ollama #15288). Native API separates `thinking`
+  and `content`.
+- EXTERNAL providers (Gemini, 5b-iii) -> LiteLLM gateway via the committed
+  LLMAdapter; both satisfy the ModelClient protocol.
+- Fail-loud (ADR-009): a backend that cannot be reached raises
+  ModelUnavailableError; never silently fall back.
+- Persistence + scheduler wiring -> 5b-ii.2b.
 """
 
 from __future__ import annotations
@@ -31,6 +34,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "You are a Clay assistant agent. Be precise and concise. "
     "Base your answer only on the provided context."
 )
+
+class ModelUnavailableError(RuntimeError):
+    """Raised when a model backend cannot be reached or returns an error.
+
+    Fail-loud (ADR-009): callers must surface this; never silently fall back
+    to another provider or to stale/empty output.
+    """
 
 @dataclass(slots=True)
 class ModelResponse:
@@ -53,11 +63,7 @@ class AgentRunResult:
 
 @runtime_checkable
 class ModelClient(Protocol):
-    """Transport-agnostic chat interface.
-
-    Implementations: OllamaNativeClient (local, native /api/chat) and a
-    gateway-backed adapter for external providers (added in 5b-iii).
-    """
+    """Transport-agnostic chat interface."""
 
     async def chat(
         self,
@@ -70,20 +76,46 @@ class ModelClient(Protocol):
 
 @runtime_checkable
 class ModelResolver(Protocol):
-    """Resolves a role id to the model id assigned by ai_control governance.
-
-    Production impl (5b-ii.2) reads ai_control_service.assignments[role_id].
-    Governance/validation stays in the service and is NOT duplicated here.
-    """
+    """Resolves a role id to its assigned model id."""
 
     def resolve_model_id(self, role_id: str) -> str: ...
+
+@runtime_checkable
+class _AssignmentsProvider(Protocol):
+    assignments: dict[str, str]
+
+@runtime_checkable
+class _OllamaSettingsLike(Protocol):
+    base_url: str
+    timeout_seconds: float
+    num_ctx: int
+
+class ServiceModelResolver:
+    """ModelResolver backed by ai_control_service.assignments.
+
+    assignments is dict[str, str] (role_id -> model_id). Governance/validation
+    lives in the service (it populates assignments via _validate_role_and_model);
+    this resolver does NOT duplicate it — it only reads.
+    """
+
+    def __init__(self, service: _AssignmentsProvider) -> None:
+        self._service = service
+
+    def resolve_model_id(self, role_id: str) -> str:
+        try:
+            model_id = self._service.assignments[role_id]
+        except KeyError:
+            raise ValueError(f"no model assigned for role_id={role_id!r}") from None
+        if not model_id:
+            raise ValueError(f"empty model assignment for role_id={role_id!r}")
+        return model_id
 
 class OllamaNativeClient:
     """ModelClient backed by the native Ollama /api/chat endpoint.
 
-    Native API (not /v1) so `thinking` and `content` come back as separate
-    fields. Inject `transport` for offline tests (httpx.MockTransport),
-    mirroring tests/llm/test_adapter.py.
+    Native API (not /v1) so `thinking` and `content` come back separately.
+    Inject `transport` for offline tests (httpx.MockTransport). Any transport
+    or HTTP-status failure is raised as ModelUnavailableError (fail-loud).
     """
 
     def __init__(
@@ -98,6 +130,20 @@ class OllamaNativeClient:
         self._timeout = timeout_seconds
         self._num_ctx = num_ctx
         self._transport = transport
+
+    @classmethod
+    def from_settings(
+        cls,
+        settings: _OllamaSettingsLike,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> "OllamaNativeClient":
+        return cls(
+            base_url=settings.base_url,
+            timeout_seconds=settings.timeout_seconds,
+            num_ctx=settings.num_ctx,
+            transport=transport,
+        )
 
     async def chat(
         self,
@@ -119,14 +165,20 @@ class OllamaNativeClient:
             "think": think,
             "options": options,
         }
-        async with httpx.AsyncClient(
-            base_url=self._base_url,
-            timeout=self._timeout,
-            transport=self._transport,
-        ) as client:
-            resp = await client.post("/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=self._timeout,
+                transport=self._transport,
+            ) as client:
+                resp = await client.post("/api/chat", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            raise ModelUnavailableError(
+                f"Ollama native API call failed for model {model!r} "
+                f"at {self._base_url}: {exc}"
+            ) from exc
         message = data.get("message", {}) or {}
         return ModelResponse(
             content=message.get("content", "") or "",
@@ -138,13 +190,12 @@ class OllamaNativeClient:
 class AgentRunner:
     """Runs one agent turn for a given role.
 
-    Steps (5b-ii.1):
-      1. Resolve the role's assigned model id (injected ModelResolver).
-      2. Assemble messages: role system prompt + caller context.
-      3. Call the injected ModelClient (local => native Ollama).
-      4. Return a normalized AgentRunResult (content + thinking + trace).
+    1. Resolve the role's assigned model id (injected ModelResolver).
+    2. Assemble messages: role system prompt + caller context.
+    3. Call the injected ModelClient (local => native Ollama).
+    4. Return a normalized AgentRunResult.
 
-    Persistence and live service wiring are DEFERRED to 5b-ii.2.
+    Propagates ModelUnavailableError fail-loud. Persistence -> 5b-ii.2b.
     """
 
     def __init__(
