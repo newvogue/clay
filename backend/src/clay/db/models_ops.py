@@ -166,3 +166,23 @@ class ReliabilityState(Base):
     last_rechecked_at: Mapped[datetime | None] = mapped_column(
         UTCDateTime, nullable=True
     )
+
+
+class AIAgentRun(Base):
+    """Persisted record of a single AgentRunner.run_agent turn (DEPLOY-5 / 5b-ii.2b).
+
+    `content`/`thinking` are populated on success; `error` is populated when the
+    turn failed loud (e.g. ModelUnavailableError). Timestamps are set from code,
+    matching the ops-schema convention (no server_default).
+    """
+
+    __tablename__ = "ai_agent_runs"
+    __table_args__ = {"schema": "ops"}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    role_id: Mapped[str] = mapped_column(String(64))
+    model_id: Mapped[str] = mapped_column(String(128))
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    thinking: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
