@@ -58,7 +58,7 @@ def test_ai_assignment_repository_bulk_upsert_seeds_initial_map(db_session) -> N
 
 def test_ai_assignment_repository_upsert_updates_existing_role(db_session) -> None:
     repo = AIAssignmentRepository(db_session)
-    repo.upsert("chief-agent", "openai-gpt-5.4")
+    repo.upsert("chief-agent", "minimax-m3")
     db_session.commit()
 
     repo.upsert("chief-agent", "openai-gpt-5.5")
@@ -70,19 +70,19 @@ def test_ai_assignment_repository_upsert_updates_existing_role(db_session) -> No
 
 def test_ai_assignment_repository_upsert_does_not_duplicate_rows(db_session) -> None:
     repo = AIAssignmentRepository(db_session)
-    repo.upsert("chief-agent", "openai-gpt-5.4")
-    repo.upsert("chief-agent", "openai-gpt-5.4")
-    repo.upsert("chief-agent", "openai-gpt-5.4")
+    repo.upsert("chief-agent", "minimax-m3")
+    repo.upsert("chief-agent", "minimax-m3")
+    repo.upsert("chief-agent", "minimax-m3")
     db_session.commit()
 
     assert db_session.scalar(select(func.count()).select_from(AIAssignment)) == 1
-    assert repo.read_all() == {"chief-agent": "openai-gpt-5.4"}
+    assert repo.read_all() == {"chief-agent": "minimax-m3"}
 
 
 def test_ai_assignment_repository_updated_at_is_tz_aware_and_recent(db_session) -> None:
     repo = AIAssignmentRepository(db_session)
     before = datetime.now(UTC)
-    repo.upsert("chief-agent", "openai-gpt-5.4")
+    repo.upsert("chief-agent", "minimax-m3")
     db_session.commit()
     after = datetime.now(UTC)
 
@@ -124,7 +124,7 @@ def test_ai_control_state_round_trip_pending_review(db_session) -> None:
         last_reviewed_at=ts,
         pending_review_id="rev-1",
         pending_review_role_id="chief-agent",
-        pending_review_model_id="openai-gpt-5.4",
+        pending_review_model_id="minimax-m3",
         pending_review_created_at=ts,
     )
     db_session.commit()
@@ -135,7 +135,7 @@ def test_ai_control_state_round_trip_pending_review(db_session) -> None:
     assert row.last_reviewed_at.tzinfo is not None
     assert row.pending_review_id == "rev-1"
     assert row.pending_review_role_id == "chief-agent"
-    assert row.pending_review_model_id == "openai-gpt-5.4"
+    assert row.pending_review_model_id == "minimax-m3"
     assert row.pending_review_created_at == ts
     assert row.pending_review_created_at.tzinfo is not None
 

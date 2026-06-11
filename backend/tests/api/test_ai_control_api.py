@@ -39,7 +39,7 @@ def build_ai_service() -> AIControlService:
 def test_ai_control_overview_exposes_assignments(db_session) -> None:
     payload = asyncio.run(get_ai_control_overview(db_session, build_ai_service()))
 
-    assert payload["summary"]["chief_agent_model"] == "GPT-5.4"
+    assert payload["summary"]["chief_agent_model"] == "MiniMax-M3"
     assert any(item["role_id"] == "chief-agent" for item in payload["assignments"])
 
 

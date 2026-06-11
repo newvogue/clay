@@ -585,19 +585,19 @@ class AIControlService:
 
     def _build_model_registry(self) -> dict[str, ModelVersion]:
         return {
-            "openai-gpt-5.4": ModelVersion(
-                model_id="openai-gpt-5.4",
-                display_name="GPT-5.4",
-                provider="OpenAI",
+            "minimax-m3": ModelVersion(
+                model_id="minimax-m3",
+                display_name="MiniMax-M3",
+                provider="TokenRouter (MiniMax)",
                 source="cloud",
                 transport="cloud",
-                training_date="2026-02-01",
-                metrics_summary="Strong synthesis, stable reasoning, high operator-facing clarity.",
-                notes="Preferred for final synthesis and review-card generation.",
+                training_date="2026-03-01",
+                metrics_summary="Multi-provider routing via TokenRouter; fast reasoning with chain-of-thought.",
+                notes="Primary chief-agent model for v1 after gpt-5.4 placeholder replacement.",
                 activation_status="active",
                 compatible_roles=("chief-agent", "market-scanner"),
                 fallback_ready=True,
-                capability_tags=("synthesis", "reasoning", "explanations"),
+                capability_tags=("reasoning", "routing", "synthesis"),
             ),
             "openai-gpt-5.4-mini": ModelVersion(
                 model_id="openai-gpt-5.4-mini",

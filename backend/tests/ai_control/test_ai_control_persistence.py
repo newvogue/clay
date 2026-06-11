@@ -117,7 +117,7 @@ def test_restart_survives_apply_assignment(
 
     assert service2.assignments["forecast-model"] == "forecast-lite-v1"
     # Other roles kept their initial mapping.
-    assert service2.assignments["chief-agent"] == "openai-gpt-5.4"
+    assert service2.assignments["chief-agent"] == "minimax-m3"
     assert service2.assignments["market-scanner"] == "openai-gpt-5.4-mini"
     assert service2.assignments["news-sentiment-agent"] == "anthropic-claude-sonnet-4.5"
     # Apply cleared the pending review, so the new service starts clean.
@@ -147,7 +147,7 @@ def test_restart_survives_pending_review_without_apply(
 ) -> None:
     service1 = build_service(sqlite_session_factory)
     review = service1.review_assignment(
-        "market-scanner", "openai-gpt-5.4", session=db_session
+        "market-scanner", "minimax-m3", session=db_session
     )
     db_session.commit()
 
@@ -156,7 +156,7 @@ def test_restart_survives_pending_review_without_apply(
     assert service2._pending_review is not None
     assert service2._pending_review.review_id == review.review_id
     assert service2._pending_review.role_id == "market-scanner"
-    assert service2._pending_review.model_id == "openai-gpt-5.4"
+    assert service2._pending_review.model_id == "minimax-m3"
     # In-memory assignments are still the defaults (apply was not called).
     assert service2.assignments["market-scanner"] == "openai-gpt-5.4-mini"
 
@@ -330,14 +330,14 @@ def test_set_assignment_persists_assignment_via_ai_assignments(
     # In-memory state reflects the new assignment immediately.
     assert service1.assignments["forecast-model"] == "forecast-lite-v1"
     # Other roles keep their initial mapping.
-    assert service1.assignments["chief-agent"] == "openai-gpt-5.4"
+    assert service1.assignments["chief-agent"] == "minimax-m3"
+
 
     # Brand-new service instance → simulates a process restart against
     # the same DB.
     service2 = build_service(sqlite_session_factory)
     assert service2.assignments["forecast-model"] == "forecast-lite-v1"
-    assert service2.assignments["chief-agent"] == "openai-gpt-5.4"
-
+    assert service2.assignments["chief-agent"] == "minimax-m3"
     # DB-level: the row was actually written.
     with sqlite_session_factory() as session:
         repo = AIAssignmentRepository(session)
@@ -418,7 +418,7 @@ def test_set_assignment_validates_role_and_model(
     with pytest.raises(ValueError, match="unknown role"):
         service.set_assignment(
             role_id="phantom-role",
-            model_id="openai-gpt-5.4",
+            model_id="minimax-m3",
             session=db_session,
         )
 
@@ -452,7 +452,7 @@ def test_set_assignment_validates_role_and_model(
         # chief-agent kept its initial model — no upsert happened.
         chief = session.get(AIAssignment, "chief-agent")
         assert chief is not None
-        assert chief.model_id == "openai-gpt-5.4"
+        assert chief.model_id == "minimax-m3"
 
 
 def test_set_assignment_emits_audit_and_event_with_source_validation_lab(

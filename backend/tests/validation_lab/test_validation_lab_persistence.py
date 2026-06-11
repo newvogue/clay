@@ -299,13 +299,13 @@ def test_apply_activation_model_assignment_persists_via_ai_control(
         repo = AIAssignmentRepository(session)
         assert repo.read_all()["forecast-model"] == "forecast-lite-v1"
         # Other roles kept their initial mapping.
-        assert repo.read_all()["chief-agent"] == "openai-gpt-5.4"
+        assert repo.read_all()["chief-agent"] == "minimax-m3"
 
     # Brand-new service instance → simulates a process restart against
     # the same DB. The promoted assignment MUST survive.
     service2 = build_service(sqlite_session_factory)
     assert service2.ai_control_service.assignments["forecast-model"] == "forecast-lite-v1"
-    assert service2.ai_control_service.assignments["chief-agent"] == "openai-gpt-5.4"
+    assert service2.ai_control_service.assignments["chief-agent"] == "minimax-m3"
 
 
 # === typing sanity
