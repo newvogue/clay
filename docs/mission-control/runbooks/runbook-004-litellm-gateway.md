@@ -148,6 +148,75 @@ scheduler tick (interval)
     → asyncio.to_thread → AIAgentRun → session.commit  # ops.ai_agent_runs
 ```
 
+### Dual-transport routing (5b-iii)
+
+Начиная с 5b-iii.1 (`a4489ac`) `AgentRunner` получает **один** `ModelClient`
+— `RoutingModelClient`, который диспатчит per-call по `model_id`:
+
+```
+AgentRunner
+  → RoutingModelClient(model_id)
+    → transport_lookup(model_id)  → "local" | "cloud"
+       ├ "local"  → OllamaNativeClient → POST /api/chat (127.0.0.1:11434)
+       └ "cloud"  → LiteLLMModelClient → LLMAdapter → LiteLLM gateway :4000
+```
+
+- `RoutingModelClient` не кэширует решение — каждый вызов `chat()` заново
+  делает lookup через `transport_for()`. Это значит: governance сменил
+  назначение → следующий же цикл пойдёт по новому транспортному плечу, без
+  restart'а раннера.
+- Источник истины — `transport`-поле `ModelVersion` в `_build_model_registry`.
+  Неизвестный `model_id` → fail-loud `ModelUnavailableError` (никакого
+  молчаливого дефолта).
+
+**Live-сравнение плеч (5b-iii, 2026-06-11):**
+
+| Метрика | Local (gemma4) | Cloud (minimax-m3) |
+|---------|----------------|-------------------|
+| Модель | `gemma4:e2b-it-qat` | `MiniMax-M3` через TokenRouter |
+| VRAM | idle ~0.6 → пик ~2.6 GB | idle ~0.53 → пик ~0.56 GB (+30MB) |
+| Latency cold | ~19s | через шлюз ~3–5s |
+| Latency hot | ~6s | ~3–5s |
+| Thinking | 1607 / 1239 токенов | NULL (cloud-путь) |
+| Транспорт | нативный Ollama `/api/chat` | LiteLLM → шлюз → TUN → провайдер |
+
+### Процедура добавления cloud-провайдера
+
+По шагам (обкатано на Gemini .4a и TokenRouter .4a):
+
+1. **Ключ:** в `~/.config/clay/litellm/litellm.env`, права 600,
+   подключается через `EnvironmentFile=` в systemd-юните.
+2. **Model-ID:** через `GET <provider>/v1/models` с Bearer-авторизацией →
+   точное значение id.
+3. **Конфиг:** блок в `config.yaml`:
+   - OpenAI-совместимые: `model: openai/<ID>` + `api_base: <base_url/v1>`
+   - Gemini: `model: gemini/gemini-2.5-flash` + `api_key: os.environ/GEMINI_API_KEY`
+4. **Рестарт:** `systemctl --user restart clay-litellm` → `liveliness` 200.
+5. **Boundary-live:** 1 curl POST `/v1/chat/completions` с маркером
+   `"Reply with exactly: CLAY-GATEWAY-OK"`.
+6. **Реестр:** feat-слайс — модель в `_build_model_registry` + assignment.
+
+### Free-tier quota
+
+- **429 = STOP**, без ретраев. Единственное корректное действие — отчёт.
+- Перед полным live-smoke циклом — пробник (1 curl, max_tokens=16).
+- Прогон цикла = 2 запроса × стоимость промпта ~200 токенов.
+- Бюджет Gemini free-tier: ~2 RPM (эмпирически). TokenRouter: безлимитно
+  (на момент 5b-iii).
+
+### FOOTGUN: IngestionSettings не читает .env
+
+`pydantic-settings` в `IngestionSettings` не имеет `env_file` в `model_config`.
+`.env` не загружается автоматически. `build_services()` в `bootstrap.py`
+дефолтит в `localhost:5432` (LIVE!). Для тестов и attended-smoke — обязательно:
+
+```bash
+CLAY_DATABASE_URL="postgresql+psycopg://clay:pass@127.0.0.1:5433/clay" uv run ...
+```
+
+Это уточнение FOOTGUN A: live 5432 — не трогать, .env сам по себе не спасает,
+нужен явный env var.
+
 ### Модель и ресурсы
 
 - **Модель:** `gemma4:e2b-it-qat` (Google Gemma 4, E2B instruct, QAT q4_0, 4.3 GB).
@@ -157,14 +226,12 @@ scheduler tick (interval)
 
 ### ⚠️ Governance gate (обязателен перед go-live)
 
-Текущее штатное назначение роли `chief-agent` — `openai-gpt-5.4` (cloud-заглушка).
-**Перед постоянной активацией** `CLAY_SCHEDULER_AI_AGENT_ENABLED=true` необходимо:
+Начиная с 5b-iii.4b (`bbf6623`) штатное назначение `chief-agent → minimax-m3` —
+это первая рабочая cloud-модель на роли chief-agent (вместо placeholder `openai-gpt-5.4`).
+Назначение зафиксировано в коде (`INITIAL_ASSIGNMENTS`, `_build_model_registry`)
+и доказано live-smoke (5b-iii.4c: 2 цикла, content_len 1115/1718, error NULL, VRAM +30MB).
 
-1. Добавить локальную модель в реестр моделей (`AIControlService._build_model_registry`) — через PR.
-2. Переназначить `chief-agent → gemma4:e2b-it-qat` штатным governance-путем
-   (`review_assignment → apply_assignment`, через API control center).
-
-Прямые DB-insert'ы в `ops.ai_assignments` допустимы **только** в attended-smoke.
+Смена назначения — штатный governance (`review_assignment → apply_assignment`, через API).
 
 ### Procedura attended smoke (кратко)
 
