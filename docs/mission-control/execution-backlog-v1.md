@@ -381,11 +381,14 @@
 Refs: ADR-005, ADR-009..012; build_specs/deploy5-ai-model-layer.md  
 Dependencies: E1, E2, E5
 
-**Backlog (зафиксировано 2026-06-11 после 5b-iii):**
+**Backlog (обновлено 2026-06-12 после 3.5e):**
 - [x] **Governance (закрыто 5b-iii.4b):** placeholder `openai-gpt-5.4` удалён; chief-agent → `minimax-m3` (cloud, TokenRouter) — штатное назначение в коде и БД.
+- [x] **Gemini full-cycle smoke (закрыто 5b-iii.5c):** заменён на Flash Lite (RPD 500 vs 20). Матрица 3 cloud × полный цикл доказана.
+- [x] **Kill-switch 3.5e (закрыто):** миграция якоря с uid 1000 на uid 945 (clay). Always-on, latch/udev удалены.
 - [ ] **Fix-слайс FOOTGUN IngestionSettings:** `.env` не читается pydantic-settings без `env_file`. Варианты: (а) добавить `env_file` в `model_config`; (б) fail-loud при дефолте на live 5432; (в) явный `CLAY_DATABASE_URL` в systemd-юните.
-- [ ] **Gemini full-cycle smoke (.3 retry):** после сброса квоты Gemini free-tier — полный контур `scheduler → agent-runner → LiteLLM → Gemini → persist`. PROBE 2026-06-11 20:52: 200 OK (квота сброшена).
 - [ ] **Provider pool free-tier:** Emma → список сайтов-источников → recon → приоритезация → LiteLLM fallback-цепочки. LiteLLM умеет автоматический failover между моделями.
+- [ ] **clay_timescaledb restart-policy:** контейнер БД не переживает ребут хоста (rootless, без `--restart`). Добавить systemd-unit или `--restart=always`.
+- [ ] **DNS metadata-leak для uid clay:** 127.0.0.53 (systemd-resolved) доступен через `lo`. Опциональное ужесточение: разрешить DNS для uid 945 только через `singbox_tun`.
 - [ ] **Retention:** добавить retention/индекс для `ops.ai_agent_runs` — отдельный слайс.
 
 ---

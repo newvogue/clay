@@ -1,6 +1,6 @@
 # Runbook-004 — LiteLLM Gateway (внешний LLM egress-boundary Clay)
 
-> **Статус:** ✅ host-native установка применена и зелёная (DEPLOY-5 / 5a-ii).
+> **Статус:** ✅ host-native установка под uid 945 (clay), DEPLOY-3.5e.
 > **ADR:** [ADR-009 — External LLM Egress Gateway](../adrs/009-external-llm-egress-gateway.md)
 > **Связанные:** [ADR-010 (Gemini free-tier)](../adrs/010-chief-agent-gemini-free-tier.md), runbook-003 (kill-switch).
 
@@ -14,24 +14,16 @@ OpenAI-API-контракт, и развязку версий/зависимос
 
 ## 2. Архитектурная граница
 
-### Внешние провайдеры (Gemini, ADR-010) — через LiteLLM
+### Внешние провайдеры (Gemini, TokenRouter) — через LiteLLM
 
 ```
-
 clay backend (py3.14, src/clay/llm/LLMAdapter)
-
 │  HTTP, OpenAI-compat  POST /v1/chat/completions
-
 ▼
-
-LiteLLM gateway  127.0.0.1:4000   (py3.13 managed-uv, отдельный процесс)
-
-│  провайдерские вызовы
-
+LiteLLM gateway  127.0.0.1:4000   (py3.13 managed-uv, uid 945, отдельный процесс)
+│  провайдерские вызовы через TUN
 ▼
-
-egress boundary (singbox_tun + kill-switch, runbook-003) → провайдер
-
+egress boundary (singbox_tun + kill-switch uid 945, runbook-003) → провайдер
 ```
 
 `LLMAdapter` импортирует litellm **не** в процесс — связь только по HTTP.
@@ -39,17 +31,11 @@ egress boundary (singbox_tun + kill-switch, runbook-003) → провайдер
 ### Локальная модель (Gemma 4) — native Ollama /api/chat
 
 ```
-
 clay backend (AgentRunner → OllamaNativeClient)
-
 │  HTTP POST /api/chat  (stream:false, think:true)
-
 ▼
-
-Ollama 127.0.0.1:11434   (gemma4:e2b-it-qat, num_ctx=65536)
-
+Ollama 127.0.0.1:11434   (gemma4:e2b-it-qat, uid ollama)
 │  loopback (TUN/kill-switch не участвует)
-
 ```
 
 **Причина обхода LiteLLM:** OpenAI-совместимый `/v1` эндпоинт Ollama возвращает
@@ -69,63 +55,69 @@ Native `/api/chat` с `think:true` возвращает раздельные `th
   хостовым 3.14; апгрейд хоста 3.14→3.15 шлюз не сломает.
 - Эмпирически подтверждено: на 3.13 установка чистая, `/health/liveliness`=200.
 
-## 4. Установка (host-native, основной путь)
+## 4. Установка (host-native, uid clay)
 
+### 4.1 Пользователь и окружение
+
+```bash
+# Пользователь создан (DEPLOY-3.5e.1):
+# sudo useradd -r -u 945 -U -m -d /var/lib/clay -s /usr/sbin/nologin clay
+
+# LiteLLM установлен под clay:
+sudo -u clay env HOME=/var/lib/clay uv tool install --python 3.13 'litellm[proxy]==1.88.1'
+# Бинарь: /var/lib/clay/.local/bin/litellm
+# Окружение: /var/lib/clay/.local/share/uv/tools/litellm/
+
+# Конфиги:
+/etc/clay/litellm/config.yaml        (clay:clay, 640)
+/etc/clay/litellm/litellm.env        (clay:clay, 600) — ключи провайдеров
 ```
 
-# 4.1 LiteLLM как изолированный uv-tool на managed Python 3.13
+### 4.2 Systemd unit (`/etc/systemd/system/clay-litellm.service`)
 
-uv tool install --python 3.13 'litellm[proxy]'   # → ~/.local/bin/litellm (1.88.1)
+```ini
+[Unit]
+Description=Clay LiteLLM gateway (OpenAI-compat, local-only)
+After=network-online.target
 
-# 4.2 конфиг (из reference-копии репо, без секретов)
+[Service]
+Type=simple
+User=clay
+Group=clay
+EnvironmentFile=/etc/clay/litellm/litellm.env
+ExecStart=/var/lib/clay/.local/bin/litellm --config /etc/clay/litellm/config.yaml --host 127.0.0.1 --port 4000
+Restart=on-failure
+RestartSec=3
 
-mkdir -p ~/.config/clay/litellm
-
-cp deploy/litellm/config.yaml.example ~/.config/clay/litellm/config.yaml
-
-# при необходимости отредактировать model_list под реальные ключи/модели
-
-# 4.3 systemd --user unit
-
-cp deploy/litellm/clay-litellm.service ~/.config/systemd/user/clay-litellm.service
-
-systemctl --user daemon-reload
-
-systemctl --user enable --now clay-litellm.service
-
-# 4.4 linger (чтобы --user сервис жил без активной сессии)
-
-loginctl enable-linger "$USER"
-
+[Install]
+WantedBy=multi-user.target
 ```
+
+```bash
+systemctl daemon-reload && systemctl enable --now clay-litellm
+```
+
+### 4.3 Старый user-unit (superseded)
+
+Ранние версии (до 3.5e) использовали systemd --user unit и конфиги
+в `~/.config/clay/litellm/`. Эти файлы оставлены как бэкап, не используются.
+Актуальный сервис — system-unit под uid 945.
 
 ## 5. Гейты здоровья
 
 | Гейт | Команда | Эталон |
 | --- | --- | --- |
-| unit active | `systemctl --user is-active clay-litellm.service` | `active` |
+| unit active | `systemctl is-active clay-litellm` | `active` |
+| uid | `ps -o uid -p $(systemctl show -p MainPID clay-litellm --value)` | `945` |
 | liveliness (local-only) | `curl -s http://127.0.0.1:4000/health/liveliness` | `200` |
-| base_url адаптера | `echo "$CLAY_LLM_BASE_URL"` | `http://127.0.0.1:4000` |
-| pytest | `cd backend && uv run pytest -q` | `430 passed` |
+| /v1/models | `curl -s 127.0.0.1:4000/v1/models` | 5 моделей |
 | рантайм-egress | аудит трафика на `/health/liveliness` | `0` внешних |
 
 > `/health/liveliness` — **локальный** пинг (без провайдеров). Полный `/health`
-> пингует модели → реальный провайдерский egress, поэтому отложен на 5b.
+> пингует модели → реальный провайдерский egress, поэтому используется только
+> в boundary-тестах.
 
-## 6. Известный нюанс — `:cloud` модели
-
-Все локальные Ollama-модели — `:cloud`-варианты (напр. `deepseek-v4-flash:cloud`)
-и требуют подписки `ollama.com/upgrade`. Поэтому E2E через них даёт
-`500 litellm.APIConnectionError: "this model requires a subscription"` — это
-**ожидаемо**, шлюз при этом исправен (liveliness=200). Полноценный E2E (5b)
-требует **либо** локально спуленной не-cloud модели (`ollama pull llama3.2`),
-**либо** реальных провайдерских ключей (см. §8).
-
-## 7. AI agent cycle (chief-agent)
-
-Периодический async-джоб, зарегистрированный в `ClayScheduler` при
-`CLAY_SCHEDULER_AI_AGENT_ENABLED=true` (default **false**). Выполняет
-один полный цикл «наблюдение → размышление → запись».
+## 6. AI agent cycle
 
 ### Флаги
 
@@ -135,171 +127,102 @@ loginctl enable-linger "$USER"
 | `CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS` | `300` | Интервал между стартами цикла (сек). |
 | `CLAY_SCHEDULER_AI_AGENT_ROLE_ID` | `chief-agent` | Роль, под которой runner резолвит модель. |
 
-### Путь данных
+### Процедура attended smoke (с uid clay)
 
+```bash
+# запуск backend от пользователя clay
+sudo -u clay \
+  CLAY_DATABASE_URL="postgresql+psycopg://clay:pass@127.0.0.1:5433/clay" \
+  CLAY_SERVER_HOST=127.0.0.1 \
+  CLAY_SCHEDULER_ENABLED=true \
+  CLAY_SCHEDULER_AI_AGENT_ENABLED=true \
+  CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS=60 \
+  CLAY_SCHEDULER_AI_AGENT_ROLE_ID=forecast-model \
+  uv run python -m clay
 ```
-scheduler tick (interval)
-  → AIAgentCycleJob.run_once()
-    → asyncio.to_thread → build_snapshot(session)     # AI-control snapshot
-    → _render_context(snapshot)                        # 7 plain-text секций
-    → AgentRunner.run_agent(role_id, context)          # ModelResolver → ModelClient
-      → локальный транспорт: OllamaNativeClient
-        → POST /api/chat (127.0.0.1:11434)
-    → asyncio.to_thread → AIAgentRun → session.commit  # ops.ai_agent_runs
-```
+
+Доступ к репо: через группу `clay` (`chgrp -R clay + setgid + ACL`).
 
 ### Dual-transport routing (5b-iii)
 
-Начиная с 5b-iii.1 (`a4489ac`) `AgentRunner` получает **один** `ModelClient`
-— `RoutingModelClient`, который диспатчит per-call по `model_id`:
-
-```
-AgentRunner
-  → RoutingModelClient(model_id)
-    → transport_lookup(model_id)  → "local" | "cloud"
-       ├ "local"  → OllamaNativeClient → POST /api/chat (127.0.0.1:11434)
-       └ "cloud"  → LiteLLMModelClient → LLMAdapter → LiteLLM gateway :4000
-```
-
-- `RoutingModelClient` не кэширует решение — каждый вызов `chat()` заново
-  делает lookup через `transport_for()`. Это значит: governance сменил
-  назначение → следующий же цикл пойдёт по новому транспортному плечу, без
-  restart'а раннера.
-- Источник истины — `transport`-поле `ModelVersion` в `_build_model_registry`.
-  Неизвестный `model_id` → fail-loud `ModelUnavailableError` (никакого
-  молчаливого дефолта).
-
-**Live-сравнение плеч (5b-iii, 2026-06-11):**
-
-| Метрика | Local (gemma4) | Cloud (minimax-m3) |
-|---------|----------------|-------------------|
-| Модель | `gemma4:e2b-it-qat` | `MiniMax-M3` через TokenRouter |
-| VRAM | idle ~0.6 → пик ~2.6 GB | idle ~0.53 → пик ~0.56 GB (+30MB) |
-| Latency cold | ~19s | через шлюз ~3–5s |
-| Latency hot | ~6s | ~3–5s |
-| Thinking | 1607 / 1239 токенов | NULL (cloud-путь) |
-| Транспорт | нативный Ollama `/api/chat` | LiteLLM → шлюз → TUN → провайдер |
-
-### Процедура добавления cloud-провайдера
-
-По шагам (обкатано на Gemini .4a и TokenRouter .4a):
-
-1. **Ключ:** в `~/.config/clay/litellm/litellm.env`, права 600,
-   подключается через `EnvironmentFile=` в systemd-юните.
-2. **Model-ID:** через `GET <provider>/v1/models` с Bearer-авторизацией →
-   точное значение id.
-3. **Конфиг:** блок в `config.yaml`:
-   - OpenAI-совместимые: `model: openai/<ID>` + `api_base: <base_url/v1>`
-   - Gemini: `model: gemini/gemini-2.5-flash` + `api_key: os.environ/GEMINI_API_KEY`
-4. **Рестарт:** `systemctl --user restart clay-litellm` → `liveliness` 200.
-5. **Boundary-live:** 1 curl POST `/v1/chat/completions` с маркером
-   `"Reply with exactly: CLAY-GATEWAY-OK"`.
-6. **Реестр:** feat-слайс — модель в `_build_model_registry` + assignment.
-
-### Free-tier quota
-
-- **429 = STOP**, без ретраев. Единственное корректное действие — отчёт.
-- Перед полным live-smoke циклом — пробник (1 curl, max_tokens=16).
-- Прогон цикла = 2 запроса × стоимость промпта ~200 токенов.
-- Бюджет Gemini free-tier: ~2 RPM (эмпирически). TokenRouter: безлимитно
-  (на момент 5b-iii).
+(Без изменений — описание маршрутизации через RoutingModelClient.)
 
 ### FOOTGUN: IngestionSettings не читает .env
 
 `pydantic-settings` в `IngestionSettings` не имеет `env_file` в `model_config`.
-`.env` не загружается автоматически. `build_services()` в `bootstrap.py`
-дефолтит в `localhost:5432` (LIVE!). Для тестов и attended-smoke — обязательно:
+`.env` не загружается автоматически. Для тестов и attended-smoke — обязательно:
 
 ```bash
 CLAY_DATABASE_URL="postgresql+psycopg://clay:pass@127.0.0.1:5433/clay" uv run ...
 ```
 
-Это уточнение FOOTGUN A: live 5432 — не трогать, .env сам по себе не спасает,
-нужен явный env var.
+## 7. Live-сравнение плеч (5b-iii, 2026-06-11)
 
-### Модель и ресурсы
+| Метрика | Local (gemma4) | Cloud (minimax-m3) | Cloud (gemini-3.1-flash-lite) |
+|---------|----------------|-------------------|------------------------------|
+| VRAM | idle ~0.6 → пик ~2.6 GB | idle ~0.53 → пик ~0.56 GB | idle ~0.53 → пик ~0.55 GB |
+| Latency cold | ~19s | ~3-5s | ~0.7-2s |
+| Latency hot | ~6s | ~3-5s | ~0.7-2s |
+| Thinking | 1607 / 1239 токенов | NULL | NULL |
+| Transport | Native Ollama `/api/chat` | LiteLLM → TUN → TokenRouter | LiteLLM → TUN → Google |
 
-- **Модель:** `gemma4:e2b-it-qat` (Google Gemma 4, E2B instruct, QAT q4_0, 4.3 GB).
-- **Ollama:** `OLLAMA_CONTEXT_LENGTH=65536`, `OLLAMA_NUM_PARALLEL=1`.
-- **VRAM (GTX 1660 SUPER 6 GB):** idle ~0.6 GB → пик ~2.6 GB (подтверждено live 2026-06-11).
-- **Latency:** первый цикл ~19s (загрузка модели в VRAM), последующие ~6s (горячий кеш).
+## 8. Rate-limit таблица Gemini
 
-### ⚠️ Governance gate (обязателен перед go-live)
+| Модель | RPM | TPM | RPD | Годна для роли? |
+|--------|-----|-----|-----|-----------------|
+| `gemini-2.5-flash` | 10 | 1M | 20 | ❌ RPD=20 непригодна для permanent |
+| `gemini-3.1-flash-lite` | 15 | 250K | 500 | ✅ forecast-model (RPD 500 / 60s interval ≈ большой запас) |
+| `Gemma 4 31B` | 15 | **Unlimited** | 1500 | ✅ RPD 1.5K + TPM Unlimited — кандидат №1 для subagents |
 
-Начиная с 5b-iii.4b (`bbf6623`) штатное назначение `chief-agent → minimax-m3` —
-это первая рабочая cloud-модель на роли chief-agent (вместо placeholder `openai-gpt-5.4`).
-Назначение зафиксировано в коде (`INITIAL_ASSIGNMENTS`, `_build_model_registry`)
-и доказано live-smoke (5b-iii.4c: 2 цикла, content_len 1115/1718, error NULL, VRAM +30MB).
+**Правило расчёта бюджета роли:**
 
-Смена назначения — штатный governance (`review_assignment → apply_assignment`, через API).
+```
+daily_calls = 86400 / interval_seconds × reserve_factor
+Достаточно, если RPD > daily_calls
+```
 
-### Procedura attended smoke (кратко)
+- forecast-model (60s): daily_calls = 1440 → RPD 500 достаточно
+- chief-agent (300s): daily_calls = 288 → любой RPD > 300
+- subagents (300s, 2 роли): daily_calls = 576 → Gemma 4 31B (RPD 1500) — профицит 2.6x
+
+**Политика ретраев:**
+- `429 = STOP` — 0 ретраев на уровне кода Clay.
+- LiteLLM/httpx ретраит на уровне соединения (connection-error, не 429) —
+  наблюдалось ~60 пакетов на 1 boundary при TUN down. Это норма для connection-errors.
+
+## 9. Правило подбора ноды для live-smoke
+
+Нода годна для сессии, если **оба** условия:
+
+1. `curl -s --max-time 5 https://api.binance.com/api/v3/ping` → 200 `{}` (есть доступ к рынку)
+2. `curl -s http://127.0.0.1:4000/v1/chat/completions -H ... -d '{"model":"gemini-3.1-flash-lite",...}'
+   ` → 200 (Gemini geo не блокирует)
+
+Проверять ПЕРЕД live-smoke. Если Gemini падает с 400 «User location not supported» —
+ноду надо сменить (встречается на части нод, включая NL).
+Geo-блок не влияет на kill-switch — трафик доходит до API.
+
+## 10. Эксплуатация
 
 ```bash
-# 1. Флип .env
-export CLAY_SCHEDULER_AI_AGENT_ENABLED=true
-export CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS=60
-
-# 2. Старт
-uv run --env-file .env python -m clay
-
-# 3. Проверка через 2-3 цикла
-curl -s 127.0.0.1:8000/health/ready                     # healthy
-psql 'postgresql://clay:pass@127.0.0.1:5433/clay' -c '
-  SELECT id, created_at, role_id, model_id,
-         length(content), length(thinking), error
-  FROM ops.ai_agent_runs ORDER BY id DESC LIMIT 5;'
-
-# 4. Revert
-# CLAY_SCHEDULER_AI_AGENT_ENABLED=false
+systemctl status clay-litellm
+journalctl -u clay-litellm -n 100 --no-pager
+systemctl restart clay-litellm
 ```
 
-## 8. Эксплуатация
+## 11. Секреты и провайдерские ключи
 
-```
+- Ключи в git **не хранятся**.
+- Актуальный файл ключей: `/etc/clay/litellm/litellm.env` (clay:clay 600).
+- Бэкап старой user-инсталляции: `~/.config/clay/litellm/` (emeritus).
+- Бэкап podman-эпохи: `~/.config/clay/_backup/old-podman-litellm-*.tar.gz`.
 
-systemctl --user status clay-litellm.service
+## 12. Podman fallback (emeritus)
 
-journalctl --user -u clay-litellm.service -n 100 --no-pager
+Образ сохранён локально, но host-native под uid 945 — основной и единственный
+активный путь. Podman-вариант не используется с DEPLOY-3.5e.
 
-systemctl --user restart clay-litellm.service
-
-```
-
-## 9. Секреты и провайдерские ключи
-
-- Ключи в git **не хранятся** (reference-конфиг обезличен).
-- Бэкап ключей старой podman-инсталляции:
-  `~/.config/clay/_backup/old-podman-litellm-*.tar.gz` (chmod 600, содержит `.env`).
-- Для 5b: восстановить ключи из бэкапа **или** завести Gemini free-tier (ADR-010),
-  добавить запись в `model_list`, протестировать boundary-live за TUN + kill-switch.
-
-## 10. Fallback — podman (контингент)
-
-Host-native — основной путь. Если он недоступен, образ оставлен как fallback:
-
-```
-
-# образ сохранён локально (НЕ удалять):
-
-podman images | grep litellm   # ghcr.io/berriai/litellm:main-stable (~1.93GB)
-
-podman run -d --name clay-litellm \
-
--p 127.0.0.1:4000:4000 \
-
--v ~/.config/clay/litellm/config.yaml:/app/config.yaml:ro \
-
-ghcr.io/berriai/litellm:main-stable \
-
---config /app/config.yaml --host 0.0.0.0 --port 4000
-
-```
-
-Podman-вариант используется **только** при отказе host-native; держать оба
-одновременно на `:4000` нельзя.
-
-## 11. Reference-артефакты в репо
+## 13. Reference-артефакты в репо
 
 - `deploy/litellm/config.yaml.example` — обезличенный шаблон конфига.
-- `deploy/litellm/clay-litellm.service` — шаблон systemd --user unit.
+- `deploy/litellm/clay-litellm.service` — шаблон systemd --user unit (emeritus).
