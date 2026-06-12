@@ -84,3 +84,46 @@
 | `5e2f5b8` | docs(context): update state.md + reports/last.md for 5b-iii.1 |
 
 HEAD `73b59ac`.
+
+## Сессия 2026-06-12 — 3.5e + DB-autostart
+
+### DEPLOY-3.5e.1 — изоляция kill-switch: пользователь `clay` + LiteLLM миграция + nft
+- ✅ Пользователь `clay` (uid 945), группа `clay`, emma в группе, ACL на /home/emma
+- ✅ Репо: `chgrp -R clay` + setgid + g+rwX
+- ✅ LiteLLM: uv tool install под clay → бинарь в `/var/lib/clay/.local/`
+- ✅ Конфиги: `/etc/clay/litellm/` (config.yaml 640, litellm.env 600 — clay:clay)
+- ✅ System unit: `/etc/systemd/system/clay-litellm.service`, `User=clay`
+- ✅ Старый user-unit: `systemctl --user disable --now`
+- ✅ Новый nft: uid 945 только — lo/singbox_tun/private accept, catch-all reject
+- ✅ udev-правило удалено, unit `WantedBy=multi-user.target` (always-on)
+- ✅ Gate B: port 4000 uid 945, liveliness 200, 5 моделей
+- ✅ 0 коммитов
+
+### DEPLOY-3.5e.2 — fail-closed verify
+- ✅ T2: clay без TUN → URLError (counter 0→3), emma OK
+- ✅ T3: clay amn0 → URLError (catch-all reject, counter 3→6)
+- ✅ T6: LiteLLM boundary TUN down → APIConnectionError (counter 6→66), liveliness 200
+- ✅ T8: reboot → kill-switch active, emma internet, LiteLLM uid 945, DB start (podman)
+- ✅ Control: TUN up → clay egress 152.53.64.139 (≠US), counter 0 прирост
+- **3.5e ЗАКРЫТ целиком.** 0 коммитов
+
+### DEPLOY-3.5e-docs — runbook-003/004 + backlog
+- ✅ runbook-003: полная переработка под 3.5e модель
+- ✅ runbook-004: пути uid 945, health gates, attended smoke template, rate-limit table, node rule
+- ✅ backlog: Gemini retry → ✅ closed, +2 пункта (restart-policy, DNS)
+- ✅ committed `b59c7f3 docs(killswitch,gateway,backlog)`
+
+### DB-AUTOSTART — clay_timescaledb restart-policy
+- ✅ Path A: `podman update --restart=always` + `podman-restart` + linger
+- ✅ Reboot → контейнер Up (healthy), extversion 2.27.1, ai_agent_runs=8
+- ✅ Регресс-проверка: kill-switch active, LiteLLM uid 945, интернет emma
+- ✅ 0 коммитов
+
+## Итог
+
+| Track | Status |
+|-------|--------|
+| 5b-iii | ✅ CLOSED — dual-transport, 3 cloud × полный цикл, 441 pytest |
+| 3.5e | ✅ CLOSED — uid 945, always-on, fail-closed proven |
+| DB-AUTOSTART | ✅ restart=always + podman-restart + linger |
+| HEAD | `b59c7f3` (13 unpushed) |

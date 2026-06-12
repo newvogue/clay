@@ -2,11 +2,14 @@
 
 - **Infrastructure & Ingestion:** ✅ MVP-ready (Live-gates G0-G4 closed).
 - **Trading Layer (FSM):** ✅ MVP-ready (Finding G CLOSED).
-- **DEPLOY TRACK:** ✅ G6-obs → DEPLOY-0/0.1/1/2/3/3.5a/3.5a-V2/3.5b/3.5c/3.5d/4 closed.
+- **DEPLOY TRACK:** ✅ G6-obs → DEPLOY-0/0.1/1/2/3/3.5a/3.5a-V2/3.5b/3.5c/3.5d/3.5e closed.
+- **DB-AUTOSTART:** ✅ `restart=always` + `podman-restart` + linger. 0 коммитов.
 - **DEPLOY-5-RECON + DOCS α1/α2:** ✅ CLOSED.
-- **DEPLOY-5 Phase 3 (code):** ✅ **5b-iii CLOSED целиком.** 3 cloud-провайдера × полный цикл. Dual-transport live на обоих плечах. 10 коммитов.
-- **HEAD:** `73b59ac` — feat(ai-control): add gemini-3.1-flash-lite registry, assign forecast-model (5b-iii.5b)
-- **origin/main:** `3a325b0` запушено (11 коммитов не запушены).
+- **DEPLOY-5 Phase 3 (code):** ✅ **5b-iii CLOSED целиком.** 3 cloud-провайдера × полный цикл. Dual-transport live на обоих плечах.
+- **DEPLOY-3.5e (kill-switch):** ✅ **CLOSED.** Пользователь `clay` (uid 945). LiteLLM под uid 945. Always-on nft. Latch/udev — history.
+- **DB-AUTOSTART:** ✅ `restart=always` + `podman-restart` + linger.
+- **HEAD:** `b59c7f3` — docs(killswitch,gateway,backlog): rewrite runbook-003 for uid-945 isolation, update runbook-004 paths/launch/node rule/rate-limit, supersede backlog items (3.5e-docs)
+- **origin/main:** `3a325b0` запушено (13 коммитов не запушены).
 
 ## DEPLOY TRACK
 
