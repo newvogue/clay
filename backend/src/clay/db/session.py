@@ -16,7 +16,7 @@ SQLITE_SCHEMA_TRANSLATE_MAP = {
 
 
 def build_engine(settings: IngestionSettings | None = None) -> Engine:
-    resolved = settings or IngestionSettings()
+    resolved = settings or IngestionSettings()  # type: ignore[reportCallIssue]  # FOOTGUN A: reads from CLAY_DATABASE_URL env
     engine_kwargs: dict[str, object] = {"future": True}
 
     if resolved.database_url.startswith("sqlite"):

@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+from pydantic import ValidationError
+
 from clay.settings.ingestion import IngestionSettings
 from clay.settings.scheduler import SchedulerSettings
 
@@ -105,6 +108,18 @@ class TestFreshnessThresholdsMethods:
             "news": timedelta(hours=1),
             "sentiment": timedelta(hours=2),
         }
+
+
+class TestFootgunAFix:
+    """FOOTGUN A: database_url is required — no silent default to live 5432."""
+
+    def test_unset_env_raises_readable_error(self, monkeypatch) -> None:
+        monkeypatch.delenv("CLAY_DATABASE_URL", raising=False)
+        with pytest.raises(ValidationError) as exc:
+            IngestionSettings()
+        msg = str(exc.value)
+        assert "database_url" in msg
+        assert "Field required" in msg or "required" in msg.lower()
 
 
 class TestSettingsExports:

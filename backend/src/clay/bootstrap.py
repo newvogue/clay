@@ -179,7 +179,7 @@ def build_services(
     runtime_manager = RuntimeManager(registry=registry)
     preflight_service = PreflightService(registry)
 
-    ingestion_settings = IngestionSettings()
+    ingestion_settings = IngestionSettings()  # type: ignore[reportCallIssue]  # FOOTGUN A: reads from CLAY_DATABASE_URL env
     exchanges_map = build_exchanges_map(ingestion_settings)
     set_source_priority([cfg.source for cfg in exchanges_map.values()])
     exchange_clients = {
@@ -332,7 +332,7 @@ def build_services(
 # from the factory — the A6-discovered double-init bug that briefly
 # made the second pass of services non-persistent is structurally
 # impossible here because there is no second pass.
-ingestion_session_factory = build_session_factory(IngestionSettings())
+ingestion_session_factory = build_session_factory(IngestionSettings())  # type: ignore[reportCallIssue]  # FOOTGUN A: reads from CLAY_DATABASE_URL env
 _services = build_services(
     config_loader=ConfigLoader(),
     session_factory=ingestion_session_factory,

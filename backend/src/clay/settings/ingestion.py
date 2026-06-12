@@ -12,7 +12,7 @@ class IngestionSettings(BaseSettings):
         extra="ignore",
     )
 
-    database_url: str = "postgresql+psycopg://clay:clay@localhost:5432/clay"
+    database_url: str  # REQUIRED: no default (FOOTGUN A fix). Set via CLAY_DATABASE_URL env.
     binance_spot_enabled: bool = True
     market_symbols: list[str] = Field(
         default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"],

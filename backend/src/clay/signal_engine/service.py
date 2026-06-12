@@ -56,7 +56,7 @@ class SignalEngineService:
         self.preflight_service = preflight_service
         self.config_loader = config_loader
         self.ai_control_service = ai_control_service
-        self.ingestion_settings = ingestion_settings or IngestionSettings()
+        self.ingestion_settings = ingestion_settings or IngestionSettings()  # type: ignore[reportCallIssue]  # FOOTGUN A: reads from CLAY_DATABASE_URL env
 
     def build_snapshot(self, session: Session) -> SignalEngineSnapshot:
         runtime_snapshot = self.runtime_manager.snapshot()
