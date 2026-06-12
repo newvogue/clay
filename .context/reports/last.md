@@ -174,6 +174,41 @@ HEAD `73b59ac`.
 - ✅ **448 passed**, ruff 13, pyright 33
 - ✅ committed `c82acd5`
 
+## Сессия 2026-06-12 — 5c.4 attended smoke (4 роли)
+
+### PREFLIGHT
+- ✅ Gateway "I'm alive!", /v1/models = 6
+- ✅ Assignments: chief→minimax-m3, scanner→gemma-4-31b, news→gemma-4-31b, forecast→gemini-3.1-flash-lite
+- ✅ psql: extversion=2.27.1 (podman), baseline=8 runs
+- ✅ Gemini probe: 200 "pong", Binance ≠US reachable
+- ✅ Git clean HEAD `a8c360b`, kill-switch active counter=4
+- ✅ `.env`→5432 root (Jun 7 mtime, эпоха P0). **Исправлен** на 5433 (синхронизирован с backend/.env)
+
+### Smoke: 3 раунда, ~14 новых строк
+
+| Раунд | Тиков | Gemma-4-31b | Gem-3.1-FL | MiniMax-M3 |
+|-------|-------|-------------|------------|------------|
+| R1 (60s) | 1 + 1⏭️ overlap | scanner✅357 + news✅544 | forecast✅567 | chief✅1539 |
+| R2 (120s) | — | ❌ 400 User location (TUN/гео) | ❌ | ❌ |
+| R3 (120s) | ~1.5 | scanner❌→✅556, news❌ | forecast✅421 | chief✅1178→✅1757 |
+
+### Гейты 5c.4
+- ✅ **FOOTGUN-D live:** 3 непустых gemma-content (357/544/556 chars), error=NULL
+- ✅ **Per-role isolation live:** scanner/news fall → chief/forecast persist → next tick green
+- ✅ **Overlap-protection raw:** `maximum number of running instances reached (1)`
+- ✅ **Kill-switch flat:** counter=4 (0 рост), VRAM flat 9.4G/31G
+- ✅ **0 коммитов**, git clean
+- ✅ **Total: 26 runs** (17 success / 9 error) в podman-5433
+
+### Наблюдения
+- **Тик 4 ролей ≈ 52s** → правило `interval ≥ 2×` (300s запас ×5.7)
+- **FOOTGUN E (candidate):** пустая 400 без тела при гео/transient → неинформативный error
+- **Двойной `.env`:** корневой (Jun 7, 5432) vs backend/.env (Jun 11, 5433). **Канонический = backend/.env**
+
+### 5c.4 ЗАКРЫТ ОКОНЧАТЕЛЬНО. Трек 5c (субагенты) доказан end-to-end на 4 ролях.
+
+## Следующий: docs-5c
+
 ## Итог
 
 | Track | Status |
@@ -184,4 +219,5 @@ HEAD `73b59ac`.
 | 5c.1 | ✅ CLOSED |
 | 5c.3 | ✅ CLOSED |
 | 5c.2 | ✅ CLOSED |
-| HEAD | `c82acd5` (16 unpushed) |
+| 5c.4 | ✅ CLOSED |
+| HEAD | `a8c360b` (16 unpushed) |

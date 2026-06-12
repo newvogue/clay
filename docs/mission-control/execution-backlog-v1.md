@@ -381,15 +381,18 @@
 Refs: ADR-005, ADR-009..012; build_specs/deploy5-ai-model-layer.md  
 Dependencies: E1, E2, E5
 
-**Backlog (обновлено 2026-06-12 после 3.5e):**
+**Backlog (обновлено 2026-06-12 после 5c.4):**
 - [x] **Governance (закрыто 5b-iii.4b):** placeholder `openai-gpt-5.4` удалён; chief-agent → `minimax-m3` (cloud, TokenRouter) — штатное назначение в коде и БД.
 - [x] **Gemini full-cycle smoke (закрыто 5b-iii.5c):** заменён на Flash Lite (RPD 500 vs 20). Матрица 3 cloud × полный цикл доказана.
 - [x] **Kill-switch 3.5e (закрыто):** миграция якоря с uid 1000 на uid 945 (clay). Always-on, latch/udev удалены.
-- [ ] **Fix-слайс FOOTGUN IngestionSettings:** `.env` не читается pydantic-settings без `env_file`. Варианты: (а) добавить `env_file` в `model_config`; (б) fail-loud при дефолте на live 5432; (в) явный `CLAY_DATABASE_URL` в systemd-юните.
-- [ ] **Provider pool free-tier:** Emma → список сайтов-источников → recon → приоритезация → LiteLLM fallback-цепочки. LiteLLM умеет автоматический failover между моделями.
-- [ ] **clay_timescaledb restart-policy:** контейнер БД не переживает ребут хоста (rootless, без `--restart`). Добавить systemd-unit или `--restart=always`.
-- [ ] **DNS metadata-leak для uid clay:** 127.0.0.53 (systemd-resolved) доступен через `lo`. Опциональное ужесточение: разрешить DNS для uid 945 только через `singbox_tun`.
-- [ ] **Retention:** добавить retention/индекс для `ops.ai_agent_runs` — отдельный слайс.
+- [x] **5c.4 multi-role smoke (закрыто):** 4 роли, 3 cloud-провайдера, FOOTGUN D live, per-role isolation proven.
+- [ ] **Fix-слайс FOOTGUN A (IngestionSettings):** повышенный приоритет (до постоянного включения флагов). `.env` не читается pydantic-settings без `env_file`. Варианты: (а) добавить `env_file` в `model_config`; (б) fail-loud при дефолте на live 5432; (в) явный `CLAY_DATABASE_URL` в systemd-юните.
+- [ ] **FOOTGUN E (LiteLLMModelClient):** захватывать HTTP status + тело ответа в error-текст при 400 Bad Request (сейчас пустая строка причины).
+- [ ] **Provider pool free-tier:** Emma → список сайтов-источников → recon → приоритезация → LiteLLM fallback-цепочки.
+- [ ] **clay_timescaledb restart-policy:** ✅ CLOSED (restart=always + podman-restart + linger).
+- [ ] **DNS metadata-leak для uid clay:** 127.0.0.53 (systemd-resolved) доступен через `lo`. Опциональное ужесточение.
+- [ ] **Retention/index `ops.ai_agent_runs`:** база растёт (26 строк, ~1152/день@300s×4). Добавить retention policy + индекс.
+- [ ] **5c.5 consumer→signal_engine:** продуктовое решение с Emma.
 
 ---
 

@@ -110,7 +110,7 @@ systemctl daemon-reload && systemctl enable --now clay-litellm
 | unit active | `systemctl is-active clay-litellm` | `active` |
 | uid | `ps -o uid -p $(systemctl show -p MainPID clay-litellm --value)` | `945` |
 | liveliness (local-only) | `curl -s http://127.0.0.1:4000/health/liveliness` | `200` |
-| /v1/models | `curl -s 127.0.0.1:4000/v1/models` | 5 моделей |
+| /v1/models | `curl -s 127.0.0.1:4000/v1/models` | 6 моделей |
 | рантайм-egress | аудит трафика на `/health/liveliness` | `0` внешних |
 
 > `/health/liveliness` — **локальный** пинг (без провайдеров). Полный `/health`
@@ -125,21 +125,60 @@ systemctl daemon-reload && systemctl enable --now clay-litellm
 | --- | --- | --- |
 | `CLAY_SCHEDULER_AI_AGENT_ENABLED` | `false` | Включить цикл. **Opt-in.** |
 | `CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS` | `300` | Интервал между стартами цикла (сек). |
-| `CLAY_SCHEDULER_AI_AGENT_ROLE_ID` | `chief-agent` | Роль, под которой runner резолвит модель. |
+| `CLAY_SCHEDULER_AI_AGENT_ROLE_IDS` | `["chief-agent"]` | JSON-список ролей для sequential multi-role цикла. |
 
-### Процедура attended smoke (с uid clay)
+### Multi-role sequential cycle (5c.2, 5c.4)
+
+Цикл выполняет роли **последовательно** в одном job типа `AIAgentCycleJob`.
+Для каждой роли из `ROLE_IDS`:
+1. Резолвится модель по `ops.ai_assignments`.
+2. Строится контекст с роль-специфичным prompt.
+3. Выполняется вызов LLM (через RoutingModelClient — cloud или local).
+4. Результат персистится в `ops.ai_agent_runs` с role_id, model_id, content, error.
+
+Ошибка одной роли **не блокирует** остальные (per-role isolation, 5c.4 live-пруф).
+
+**Overlap-protection:** `max_instances=1` + APScheduler Lock — **не ослаблять**.
+Если тик длиннее интервала, APScheduler логгирует `maximum number of running
+instances reached` и скипает следующий (raw-пруф 5c.4).
+
+**Правило интервала:** `interval ≥ 2× длительность тика`. Замер: тик
+4 ролей ≈ **52s** sequential. Latency-ряд: Flash Lite 0.69s / 2.5 Flash
+1.23s / Gemma 31B 1.4s / MiniMax 3.78s. На production-интервале 300s
+запас ×5.7. При добавлении ролей/провайдеров — пересчитывать.
+
+### Процедура attended smoke (uid clay)
+
+На хосте `sudo` заменён на `pkexec`. Рабочая форма:
 
 ```bash
-# запуск backend от пользователя clay
-sudo -u clay \
-  CLAY_DATABASE_URL="postgresql+psycopg://clay:pass@127.0.0.1:5433/clay" \
-  CLAY_SERVER_HOST=127.0.0.1 \
-  CLAY_SCHEDULER_ENABLED=true \
-  CLAY_SCHEDULER_AI_AGENT_ENABLED=true \
-  CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS=60 \
-  CLAY_SCHEDULER_AI_AGENT_ROLE_ID=forecast-model \
-  uv run python -m clay
+pkexec su -s /bin/bash clay -c '
+  cd /home/emma/Projects/clay/backend
+  set -a; . ./.env; set +a
+  export CLAY_SERVER_HOST=127.0.0.1
+  export CLAY_SCHEDULER_ENABLED=true
+  export CLAY_SCHEDULER_AI_AGENT_ENABLED=true
+  export CLAY_SCHEDULER_AI_AGENT_INTERVAL_SECONDS=60
+  export CLAY_SCHEDULER_AI_AGENT_ROLE_IDS=["chief-agent","market-scanner","news-sentiment-agent","forecast-model"]
+  exec timeout 180 uv run python -m clay
+'
 ```
+
+**Контракты:**
+- JSON-список ROLE_IDS — в одинарных кавычках (shell-safe, Jinja2-безопасно).
+- Пароли в `.env` (source внутри su-шелла) — **не в argv**, не светятся в `ps`.
+- `.env` канонический: `backend/.env` (см. §14).
+- `exec timeout` — автоматический shutdown через N секунд.
+
+**Fallback** (если `pkexec su` блокирован polkit):
+```bash
+pkexec systemd-run --uid=clay --gid=clay \
+  -p WorkingDirectory=/home/emma/Projects/clay/backend \
+  -p EnvironmentFile=<tmp-файл 600, флаги+DSN, удалить> \
+  -t uv run python -m clay
+```
+
+**STOP-условия:** 429 → 0 ретраев кода; нет коннекта к 5433 → STOP (не фабриковать).
 
 Доступ к репо: через группу `clay` (`chgrp -R clay + setgid + ACL`).
 
@@ -147,14 +186,23 @@ sudo -u clay \
 
 (Без изменений — описание маршрутизации через RoutingModelClient.)
 
-### FOOTGUN: IngestionSettings не читает .env
+### DSN и канонический .env
+
+**Канонический путь:** `backend/.env` (source внутри su-шелла).
+**Корневой `.env` проекта** (эпоха P0, mtime Jun 7, порт 5432) —
+не источник истины. После синхронизации (5c.4) оба файла указывают
+на 127.0.0.1:5433 с сильным паролем.
+
+**Инвариант:** DB-факты только через raw psql. Нет коннекта = STOP.
+Пароль БД для attended smoke — из `.env`, **не** `clay:clay` (неверен
+для 5433, scram-sha-256 аутентификация).
+
+### FOOTGUN A: IngestionSettings не читает .env
 
 `pydantic-settings` в `IngestionSettings` не имеет `env_file` в `model_config`.
-`.env` не загружается автоматически. Для тестов и attended-smoke — обязательно:
-
-```bash
-CLAY_DATABASE_URL="postgresql+psycopg://clay:pass@127.0.0.1:5433/clay" uv run ...
-```
+`.env` не загружается автоматически. При дефолте — bootstrap смотрит на
+live 5432. Для attended smoke и тестов обязателен явный `CLAY_DATABASE_URL`
+(source `.env` или export).
 
 ## 7. Live-сравнение плеч (5b-iii, 2026-06-11)
 
@@ -226,3 +274,27 @@ systemctl restart clay-litellm
 
 - `deploy/litellm/config.yaml.example` — обезличенный шаблон конфига.
 - `deploy/litellm/clay-litellm.service` — шаблон systemd --user unit (emeritus).
+
+## 14. FOOTGUN D/E — Gemma 4 через Gemini API
+
+### FOOTGUN D (закрыт, 5c.2, commit `c82acd5`)
+
+Gemma 4 31B через Gemini API возвращает `content: null`, а
+содержимое — в поле `reasoning_content`. Если не обработать,
+в `ai_agent_runs.content` попадает пустая строка → FOOTGUN D.
+
+**Фикс:** `LiteLLMModelClient.parse_response` — fallback: если
+`content` пустой (нуль/пусто), проверить `reasoning_content` и
+использовать его как `content`. Если оба пусты — fail-loud.
+
+**Live-пруф (5c.4):** 3 непустых gemma-4-31b content (357/544/556 chars),
+error=NULL.
+
+### FOOTGUN E (candidate, открыт)
+
+При гео/transient-сбое Gemini LiteLLM возвращает `400 Bad Request`
+с пустым/неинформативным телом. В `ai_agent_runs.error` попадает
+строка без причины (только `LiteLLM gateway call failed... 400:`).
+
+**План фикса:** `LiteLLMModelClient` — захватывать HTTP status +
+тело ответа в error-текст для диагностируемости. Отдельный fix-слайс.

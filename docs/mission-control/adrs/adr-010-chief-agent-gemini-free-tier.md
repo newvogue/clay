@@ -68,6 +68,64 @@ Gemini boundary-live (5b-iii.2): 200, latency 1.23s, 43 токена (12p+31c, 2
 - **Секреты:** только `~/.config/clay/litellm/litellm.env` (600),
   никогда в git и никогда через чат.
 
+## Addendum 2026-06-12 — Multi-role sequential cycle + reasoning sematics + RPD budget
+
+### Multi-role: variant A (один job, sequential)
+
+**Проблема:** каждая роль требует отдельного запуска цикла. Если делать N
+scheduler job'ов (variant B) — N-кратная нагрузка на APScheduler и
+потенциальные race-условия при одновременном старте.
+
+**Решение (variant A, 5c.2):** один job типа `AIAgentCycleJob` выполняет
+роли **последовательно** из JSON-списка `CLAY_SCHEDULER_AI_AGENT_ROLE_IDS`.
+Список задаётся env-переменной (pydantic `list[str]` → JSON-парсинг):
+
+```python
+role_ids: list[str] = ["chief-agent"]
+# → export CLAY_SCHEDULER_AI_AGENT_ROLE_IDS='["chief-agent","market-scanner",...]'
+```
+
+- Внутренний цикл: для каждого `role_id` → резолв модели → контекст → LLM → persist.
+- Ошибка одной роли **не прерывает** цикл — error записывается в строку с
+  `model_id="unresolved"`, остальные роли выполняются (per-role isolation).
+- Overlap-protection: `max_instances=1` + APScheduler Lock.
+
+### Reasoning fallback семантика (FOOTGUN D)
+
+Gemma 4 31B через Gemini API может возвращать `content: null` при
+непустом `reasoning_content`. **Решение:** при пустом `content` — 
+fallback к `reasoning_content` в `LiteLLMModelClient.parse_response`.
+Если оба пусты — fail-loud `ModelUnavailableError`.
+
+Это **намеренно** не сквозное поведение (не в `ChatMessage` валидации):
+fallback на уровне ModelClient позволяет каждому транспортному клиенту
+иметь свою логику. `ChatMessage` хранит оба поля.
+
+### RPD budget по ролям (5c.4 live)
+
+| Роль | Модель | RPD | Daily calls@300s | Профицит |
+|------|--------|-----|-------------------|----------|
+| chief-agent | minimax-m3 (TokenRouter) | не лимитирован | 288 | ∞ |
+| market-scanner | gemma-4-31b (Gemini) | 1500 | 288 | ×5.2 |
+| news-sentiment-agent | gemma-4-31b (Gemini) | 1500 (shared) | 288 | ×2.6 |
+| forecast-model | gemini-3.1-flash-lite | 500 | 288 | ×1.7 |
+
+**Правило:** `daily_calls = 86400 / interval × roles_count`.
+Достаточно, если RPD > daily_calls. При interval=300s и 4 ролях:
+daily_calls=1152. Лимитирующий фактор — Gemini free-tier (500 RPD на
+Flash Lite, 1500 на Gemma, расщепление общей квоты на 2 роли).
+
+### Live-метрики мульти-роль (5c.4, 2026-06-12)
+
+| Роль | Модель | Content | Latency | Error |
+|------|--------|---------|---------|-------|
+| chief-agent | minimax-m3 | 1539/1178/1757/2284 chars | ~3-5s | NULL |
+| market-scanner | gemma-4-31b | 357/556 chars | ~1.4s | NULL (2 успешных) |
+| news-sentiment-agent | gemma-4-31b | 544 chars | ~1.4s | NULL |
+| forecast-model | gemini-3.1-flash-lite | 421/567 chars | ~0.69s | NULL |
+
+Общее время тика (4 роли sequential): ~52s.
+
 ## Альтернативы
 
 - OpenAI / Anthropic (платно). Отклонено: стоимость.

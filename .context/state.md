@@ -8,7 +8,7 @@
 - **DEPLOY-5 Phase 3 (code):** ✅ **5b-iii CLOSED целиком.** 3 cloud-провайдера × полный цикл. Dual-transport live на обоих плечах.
 - **DEPLOY-3.5e (kill-switch):** ✅ **CLOSED.** Пользователь `clay` (uid 945). LiteLLM под uid 945. Always-on nft. Latch/udev — history.
 - **DB-AUTOSTART:** ✅ `restart=always` + `podman-restart` + linger.
-- **HEAD:** `c82acd5` — feat(scheduler): multi-role ai agent cycle + reasoning_content fallback
+- **HEAD:** `a8c360b` — docs(context): update state, reports for 5c.3 + 5c.2 close
 - **origin/main:** `3a325b0` запушено (16 коммитов не запушены).
 
 ## DEPLOY TRACK
@@ -41,33 +41,37 @@
 - **5c.1 (subagent roles):** ✅ **ЗАКРЫТ.** gemma-4-31b в registry, INITIAL_ASSIGNMENTS обновлены, role_prompts + параметризация _render_context, герметизация singleton под pytest, DB 5433 sync. Commit `00adb03`.
 - **5c.3 (Gemma 4 31B host-config + gateway):** ✅ **ЗАКРЫТ.** config.yaml + restart → 6 моделей, boundary-live 200/1.4s. 0 коммитов.
 - **5c.2 (multi-role scheduler):** ✅ **ЗАКРЫТ.** AIAgentCycleJob sequential multi-role, per-role isolation, ROLE_IDS (JSON), FOOTGUN D fix (reasoning_content fallback). Commit `c82acd5`.
+- **5c.4 (live smoke 4 роли):** ✅ **ЗАКРЫТ.** 1 полный тик 4/4 + overlap пруф + FOOTGUN D live + per-role isolation в бою. Трек 5c доказан end-to-end.
 - **DEPLOY-CUTOVER** (pg_dump live→podman): 📋 отложен.
 
 ## Pending
 
-- **5c.2 (multi-role scheduler):** 📋 variant A (list role_ids in 1 job)
-- **5c.3 (Gemma 4 31B host-config + gateway):** 📋 boundary-live тест
-- **5c.4 (live smoke оба субагента):** 📋 следующий. Нода: Binance ≠US + Gemini probe. Бюджет: 4 роли cloud × 300s = 1152 req/day (Gemini 500 + Gemma 1500 RPD).
-- **Fix-slice FOOTGUN IngestionSettings:** env_file не добавлен (env_file ломает тесты production .env). Герметизация singleton решена через os.environ.setdefault в conftest.py.
+- **docs-5c:** 📋 **текущий.** runbook-004 DSN fix, multi-role docs, FOOTGUN D/E, ADR-010 addendum, incident-log, backlog. docs-only, 0 src/tests.
+- **Fix-slice FOOTGUN A (IngestionSettings):** 📋 повышенный приоритет (до постоянного включения флагов). env_file не добавлен.
+- **FOOTGUN E (candidate):** 📋 LiteLLMModelClient — захватывать status+body ответа в error.
+- **5c.5 (consumer→signal_engine):** 📋 продуктовое решение с Emma.
+- **Provider pool free-tier:** 📋 Emma → список → recon → приоритезация.
+- **Retention/index `ai_agent_runs`:** 📋 база растёт (26 строк, ~1152/день@300s×4).
 
 ## Critical Context
 
 - **Live-5432** НЕ ТРОГАТЬ. **Podman-5433** — рабочая БД.
-- **CLAY_DATABASE_URL** = `localhost:5433` (podman). FOOTGUN A: .env НЕ читается pydantic-settings, нужен явный env var.
-- **TUN UP** (exit=🇳🇱 Netherlands, MIRhosting). Kill-switch вооружён (udev-arm, 71 reject pkts).
-- **Scheduler ON**: `CLAY_SCHEDULER_ENABLED=true`.
+- **CLAY_DATABASE_URL** = `127.0.0.1:5433` (podman). Канонический путь `backend/.env` (синхронизирован с корневым `.env`). FOOTGUN A (env_file) — open.
+- **TUN UP** (exit=🇳🇱 Netherlands, MIRhosting). Kill-switch вооружён, counter=4.
 - **LiteLLM:** host-native (uv tool, 1.88.1), порт 4000, systemd --user unit, **6 моделей**: gemma4-e2b, local-ollama, gemini-2.5-flash, minimax-m3, gemini-3.1-flash-lite, **gemma-4-31b**
 - **Ollama:** system-сервис, `OLLAMA_HOST=127.0.0.1`, `OLLAMA_CONTEXT_LENGTH=65536`, `OLLAMA_NUM_PARALLEL=1`, порт 11434
 - **Dual-transport:** RoutingModelClient per-call по transport-полю registry. Cloud: LiteLLM → 3 провайдера. Local: Ollama native `/api/chat`.
 - **3 live провайдера:** Ollama (gemma4 local), TokenRouter (MiniMax-M3), Google (Gemini 3.1 Flash Lite, Gemini 2.5 Flash fallback)
 - **test:** 448 passed (+6 multi-role/FOOTGUN-D tests). Ruff 13/Pyright 33 baseline.
 - **keys:** 2 ключа в `~/.config/clay/litellm/litellm.env` (600): GEMINI_API_KEY, TOKENROUTER_API_KEY. Gemma-4-31b использует тот же GEMINI_API_KEY.
-- **env open issue:** `IngestionSettings.env_file` отсутствует → bootstrap дефолтит на live 5432. Для attended smoke и тестов обязателен явный `CLAY_DATABASE_URL`.
+- **Тик 4 ролей ≈ 52s sequential.** Правило интервала: `interval ≥ 2× длительность тика` (300s → запас ×5.7).
+- **Last smoke:** 26 runs (17 success / 9 error) в 5433. Per-role isolation proven live.
 
 ## Commits (сессия)
 
 | SHA | Message |
 |-----|---------|
+| `a8c360b` | docs(context): update state, reports for 5c.3 + 5c.2 close |
 | `c82acd5` | feat(scheduler): multi-role ai agent cycle + reasoning_content fallback |
 | `57bfc9a` | docs(context): update state, reports for 5c.1 close + 5c.3 host-config |
 | `00adb03` | feat(ai_control): wire subagent roles to gemma-4-31b + role prompts + hermetic tests |
