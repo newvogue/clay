@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             ai_agent_cycle_job = AIAgentCycleJob(
                 runner=runner,
                 session_factory=_session_factory,
-                role_id=scheduler_settings.ai_agent_role_id,
+                role_ids=scheduler_settings.ai_agent_role_ids,
                 ai_control_service=_ai_control_service,
             )
         if scheduler_settings.enabled:

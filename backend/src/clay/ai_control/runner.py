@@ -222,7 +222,13 @@ class LiteLLMModelClient:
                 f"at {self._adapter._settings.base_url}: {exc}"
             ) from exc
         choice = response.choices[0] if response.choices else None
-        content = choice.message.content if choice else ""
+        content = (choice.message.content or None) if choice else None
+        reasoning = (choice.message.reasoning_content or None) if choice else None
+        content = content or reasoning
+        if not content:
+            raise ModelUnavailableError(
+                f"LiteLLM gateway returned empty content for model {model!r}"
+            )
         return ModelResponse(content=content, thinking=None)
 
 

@@ -9,6 +9,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 from clay.ai_control.runner import (
     LiteLLMModelClient,
@@ -167,11 +168,8 @@ def test_litellm_client_empty_choices_returns_empty() -> None:
         transport=httpx.MockTransport(handler),
     )
     client = LiteLLMModelClient(adapter=adapter)
-    resp = asyncio.run(
-        client.chat([ChatMessage(role="user", content="x")], model="m")
-    )
-    assert resp.content == ""
-    assert resp.thinking is None
+    with pytest.raises(ModelUnavailableError, match="empty content"):
+        asyncio.run(client.chat([ChatMessage(role="user", content="hi")], model="m"))
 
 
 def test_litellm_client_raises_model_unavailable_on_http_500() -> None:

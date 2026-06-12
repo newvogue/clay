@@ -127,21 +127,23 @@ class AIAgentCycleJob:
         *,
         runner: AgentRunner,
         session_factory: sessionmaker,
-        role_id: str,
+        role_ids: list[str],
         ai_control_service: AIControlService,
     ) -> None:
         self._runner = runner
         self._session_factory = session_factory
-        self._role_id = role_id
+        self._role_ids = role_ids
         self._ai_control_service = ai_control_service
         self._lock = asyncio.Lock()
 
     async def run_once(self) -> None:
         """Execute one agent cycle: snapshot → render → run → persist.
 
-        ``ModelUnavailableError`` is caught and recorded in ``error``
-        column (fail-loud persistence, not crash). Other exceptions
-        propagate to ``_arun_safely`` for standard scheduler recovery.
+        Iterates over all configured role_ids **sequentially** (one
+        ``asyncio.Lock`` per tick, no parallelism). Per-role isolation:
+        a ``ModelUnavailableError`` on role N records an error row and
+        continues to role N+1; other exceptions propagate to
+        ``_arun_safely``.
         """
         if self._lock.locked():
             logger.warning(
@@ -151,33 +153,34 @@ class AIAgentCycleJob:
 
         async with self._lock:
             snapshot = await asyncio.to_thread(self._build_snapshot)
-            context = _render_context(snapshot, self._role_id)
-            try:
-                result = await self._runner.run_agent(self._role_id, context)
-            except ModelUnavailableError as exc:
-                logger.warning(
-                    "clay.scheduler: ai-agent-cycle ModelUnavailableError "
-                    "for role=%s: %s",
-                    self._role_id,
-                    exc,
-                )
-                await asyncio.to_thread(
-                    self._persist_error,
-                    created_at=datetime.now(UTC),
-                    role_id=self._role_id,
-                    model_id=getattr(exc, "model_id", None) or "unresolved",
-                    error=str(exc),
-                )
-                return
+            for role_id in self._role_ids:
+                context = _render_context(snapshot, role_id)
+                try:
+                    result = await self._runner.run_agent(role_id, context)
+                except ModelUnavailableError as exc:
+                    logger.warning(
+                        "clay.scheduler: ai-agent-cycle ModelUnavailableError "
+                        "for role=%s: %s",
+                        role_id,
+                        exc,
+                    )
+                    await asyncio.to_thread(
+                        self._persist_error,
+                        created_at=datetime.now(UTC),
+                        role_id=role_id,
+                        model_id=getattr(exc, "model_id", None) or "unresolved",
+                        error=str(exc),
+                    )
+                    continue
 
-            await asyncio.to_thread(
-                self._persist_success,
-                created_at=datetime.now(UTC),
-                role_id=self._role_id,
-                model_id=result.model_id,
-                content=result.content,
-                thinking=result.thinking,
-            )
+                await asyncio.to_thread(
+                    self._persist_success,
+                    created_at=datetime.now(UTC),
+                    role_id=role_id,
+                    model_id=result.model_id,
+                    content=result.content,
+                    thinking=result.thinking,
+                )
 
     def _build_snapshot(self) -> AIControlSnapshot:
         """Sync block: open session, call build_snapshot, close."""

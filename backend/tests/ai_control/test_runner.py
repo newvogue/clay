@@ -11,16 +11,18 @@ import json
 import os
 
 import httpx
+import pytest
 
 from clay.ai_control.runner import (
     AgentRunner,
     DEFAULT_SYSTEM_PROMPT,
+    LiteLLMModelClient,
     ModelResponse,
     ModelUnavailableError,
     OllamaNativeClient,
     ServiceModelResolver,
 )
-from clay.llm import ChatMessage
+from clay.llm import ChatMessage, ChatCompletionResponse
 from clay.settings.ollama import OllamaSettings
 
 class StubResolver:
@@ -237,3 +239,42 @@ def test_agent_runner_role_prompts_dispatch_and_fallback() -> None:
     assert runner._system_prompt_for("known-role") == "Ты известная роль."
     assert runner._system_prompt_for("unknown-role") == DEFAULT_SYSTEM_PROMPT
     assert runner._system_prompt_for("") == DEFAULT_SYSTEM_PROMPT
+
+
+def test_litellm_client_reasoning_content_fallback() -> None:
+    """FOOTGUN D: content=null, reasoning_content="thoughts" → content="thoughts".
+
+    Also tests: both empty → ModelUnavailableError.
+    """
+    from unittest.mock import MagicMock
+
+    from clay.ai_control.runner import LiteLLMModelClient
+    from clay.llm import ChatCompletionChoice, ChatCompletionResponse, ChatMessage as LLMChatMessage
+    from clay.llm import LLMAdapter
+
+    adapter = MagicMock(spec=LLMAdapter)
+
+    async def _mock_chat(content: str | None, reasoning: str | None):
+        msg = LLMChatMessage(role="assistant", content=content or "", reasoning_content=reasoning)
+        choice = ChatCompletionChoice(index=0, message=msg)
+        adapter.chat_completion.return_value = ChatCompletionResponse(
+            id="test",
+            model="gemma-4-31b",
+            choices=[choice],
+        )
+        client = LiteLLMModelClient(adapter=adapter)
+        resp = await client.chat([ChatMessage(role="user", content="hi")], model="gemma-4-31b")
+        return resp
+
+    # Case 1: content=null, reasoning_content="..." → content="..."
+    resp = asyncio.run(_mock_chat(None, "deep thinking result"))
+    assert resp.content == "deep thinking result"
+    assert resp.thinking is None
+
+    # Case 2: content="ok", reasoning_content="..." → content="ok" (prefer content)
+    resp = asyncio.run(_mock_chat("ok", "irrelevant"))
+    assert resp.content == "ok"
+
+    # Case 3: both empty → ModelUnavailableError
+    with pytest.raises(ModelUnavailableError, match="empty content"):
+        asyncio.run(_mock_chat(None, None))

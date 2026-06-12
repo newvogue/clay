@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class ChatMessage(BaseModel):
     role: str
     content: str
+    reasoning_content: str | None = None
 
 
 class ChatCompletionRequest(BaseModel):

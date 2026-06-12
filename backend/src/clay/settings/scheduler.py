@@ -78,9 +78,11 @@ class SchedulerSettings(BaseSettings):
     # will override to a shorter value for quick feedback.
     ai_agent_interval_seconds: int = 300
 
-    # 5b-ii.2b-ii: role id that the ``ai-agent-cycle`` job resolves
-    # through ``ServiceModelResolver``. Default = ``"chief-agent"``.
-    ai_agent_role_id: str = "chief-agent"
+    # 5b-ii.2b-ii: role ids that the ``ai-agent-cycle`` job resolves
+    # through ``ServiceModelResolver``. JSON list in env var, e.g.
+    # ``CLAY_SCHEDULER_AI_AGENT_ROLE_IDS='["chief-agent","market-scanner"]'``.
+    # Default = ``["chief-agent"]``.
+    ai_agent_role_ids: list[str] = ["chief-agent"]
 
     # MP1: interval for the ``ops-retention`` prune-job. Default 86400s
     # (once per day). Operator can override via

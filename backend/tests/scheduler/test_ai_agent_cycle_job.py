@@ -132,7 +132,7 @@ class TestAIAgentCycleJob:
         job = AIAgentCycleJob(
             runner=fake_runner,  # type: ignore[arg-type]
             session_factory=sqlite_session_factory,
-            role_id="chief-agent",
+            role_ids=["chief-agent"],
             ai_control_service=svc,  # type: ignore[arg-type]
         )
         await job.run_once()
@@ -167,7 +167,7 @@ class TestAIAgentCycleJob:
         job = AIAgentCycleJob(
             runner=fake_runner,  # type: ignore[arg-type]
             session_factory=sqlite_session_factory,
-            role_id="chief-agent",
+            role_ids=["chief-agent"],
             ai_control_service=svc,  # type: ignore[arg-type]
         )
         await job.run_once()
@@ -195,7 +195,7 @@ class TestAIAgentCycleJob:
         job = AIAgentCycleJob(
             runner=runner,  # type: ignore[arg-type]
             session_factory=sqlite_session_factory,
-            role_id="chief-agent",
+            role_ids=["chief-agent"],
             ai_control_service=svc,  # type: ignore[arg-type]
         )
         # Acquire the lock, then try to run — should skip.
@@ -289,3 +289,100 @@ class TestClaySchedulerIntegration:
         _kwargs = scheduler._apscheduler.add_job.call_args.kwargs
         assert _kwargs["executor"] == "async"
         assert _kwargs["id"] == "ai-agent-cycle"
+
+
+class TestMultiRole:
+    async def test_two_roles_produce_two_rows(
+        self,
+        sqlite_session_factory: Any,
+    ) -> None:
+        fake_runner = _FakeRunner()
+        snapshot = _empty_snapshot()
+        svc = _FakeAIControlService(snapshot)
+        job = AIAgentCycleJob(
+            runner=fake_runner,  # type: ignore[arg-type]
+            session_factory=sqlite_session_factory,
+            role_ids=["chief-agent", "forecast-model"],
+            ai_control_service=svc,  # type: ignore[arg-type]
+        )
+        await job.run_once()
+
+        assert len(fake_runner.calls) == 2
+        assert fake_runner.calls[0][0] == "chief-agent"
+        assert fake_runner.calls[1][0] == "forecast-model"
+
+        session = sqlite_session_factory()
+        try:
+            rows = session.query(AIAgentRun).all()
+            assert len(rows) == 2
+            assert rows[0].role_id == "chief-agent"
+            assert rows[1].role_id == "forecast-model"
+            assert rows[0].error is None
+            assert rows[1].error is None
+        finally:
+            session.close()
+
+    async def test_isolation_role1_error_role2_persists(
+        self,
+        sqlite_session_factory: Any,
+    ) -> None:
+        fake_runner = _FakeRunner()
+        # Simulate: role 1 fails, role 2 succeeds.
+        call_count = 0
+
+        original_run = fake_runner.run_agent
+
+        async def patched_run(role_id: str, context: str) -> AgentRunResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ModelUnavailableError("role1 down")
+            return await original_run(role_id, context)
+
+        fake_runner.run_agent = patched_run  # type: ignore[method-assign]
+        snapshot = _empty_snapshot()
+        svc = _FakeAIControlService(snapshot)
+        job = AIAgentCycleJob(
+            runner=fake_runner,  # type: ignore[arg-type]
+            session_factory=sqlite_session_factory,
+            role_ids=["market-scanner", "forecast-model"],
+            ai_control_service=svc,  # type: ignore[arg-type]
+        )
+        await job.run_once()
+
+        assert call_count == 2
+        session = sqlite_session_factory()
+        try:
+            rows = session.query(AIAgentRun).order_by(AIAgentRun.created_at).all()
+            assert len(rows) == 2
+            assert rows[0].role_id == "market-scanner"
+            assert rows[0].error == "role1 down"
+            assert rows[0].content is None
+            assert rows[1].role_id == "forecast-model"
+            assert rows[1].error is None
+            assert rows[1].content == "hello world"
+        finally:
+            session.close()
+
+
+class TestAIAgentRoleIdsParsing:
+    def test_default_single_chief(self) -> None:
+        settings = SchedulerSettings()
+        assert settings.ai_agent_role_ids == ["chief-agent"]
+
+    def test_json_env(self, monkeypatch) -> None:
+        monkeypatch.setenv(
+            "CLAY_SCHEDULER_AI_AGENT_ROLE_IDS",
+            '["chief-agent","market-scanner","news-sentiment-agent"]',
+        )
+        settings = SchedulerSettings()
+        assert settings.ai_agent_role_ids == [
+            "chief-agent",
+            "market-scanner",
+            "news-sentiment-agent",
+        ]
+
+    def test_single_item_json(self, monkeypatch) -> None:
+        monkeypatch.setenv("CLAY_SCHEDULER_AI_AGENT_ROLE_IDS", '["chief-agent"]')
+        settings = SchedulerSettings()
+        assert settings.ai_agent_role_ids == ["chief-agent"]
