@@ -130,3 +130,40 @@ Flash Lite, 1500 на Gemma, расщепление общей квоты на 2
 
 - OpenAI / Anthropic (платно). Отклонено: стоимость.
 - Полностью локальный chief (Ollama). Отклонено сейчас (качество/железо), **ревизуемо** как fallback/последняя инстанция. После live-пруфа cloud (minimax-m3, VRAM +30MB vs +2GB) локальный chief — шаг назад.
+
+## Addendum 3 — 2026-06-13 — Иерархия v1 + 5c.5 (subagent→chief контекст)
+
+### Механизм (5c.5.1, commit `daa079c`)
+
+Выводы субагентов вклеиваются во **входной контекст** chief-agent через
+`list_latest_agent_runs` (OpsRepository, DISTINCT ON role_id, WHERE error IS NULL
+AND content IS NOT NULL). Контекст НЕ персистится в `ai_agent_runs.content` —
+там хранится только ответ модели. Поэтому пруф синтеза **непрямой**:
+сопоставление output content chief vs субагентов.
+
+**Наблюдаемость:** INFO-лог рендера не реализован (backlog). При отладке —
+секция `=== subagent_reports ===` присутствует в отрендеренном контексте
+на стороне chief до вызова LLM и не пишется в БД.
+
+### Рекомендованный порядок ROLE_IDS
+
+```
+["market-scanner", "news-sentiment-agent", "forecast-model", "chief-agent"]
+```
+
+Субагенты → chief последним, чтобы chief в своём тике видел результаты
+текущего тика. Ошибка субагента не прерывает цикл (per-role isolation),
+но chief может не получить данные упавшей роли.
+
+### Smoke-пруф (2026-06-12)
+
+| id | Роль | Модель | Content |
+|----|------|--------|---------|
+| 31 | market-scanner | gemma4:e2b-it-qat | 230 chars |
+| 32 | news-sentiment-agent | gemma4:e2b-it-qat | 1323 chars |
+| 33 | forecast-model | gemma4:e2b-it-qat | 337 chars |
+| 34 | chief-agent | minimax-m3 | 3387 chars |
+
+Chief явно ссылается на данные каждого субагента (совпадающие факты/формулировки),
+что доказывает: синтез-путь работает end-to-end. Условия: local-ollama
+(в обход Google RPD), repeatable по процедуре runbook-004 §Re-smoke.

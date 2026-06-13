@@ -300,3 +300,72 @@ error=NULL.
 
 **План фикса:** `LiteLLMModelClient` — захватывать HTTP status +
 тело ответа в error-текст для диагностируемости. Отдельный fix-слайс.
+
+### FOOTGUN F (candidate, investigating)
+
+SSE-роуты `/workspace/trading/stream`, `/control-center/stream`,
+`/reliability/stream` возвращают `200 text/event-stream`, но **не эмитят
+событий** — frontend висит в LOADING, ожидая первого `data:`.
+
+**Диагноз:** роуты существуют, CORS настроен, SSE-соединение открывается,
+но publisher (механизм, который должен класть события в очередь) никем
+не вызывается. Пустой стрим = вечная загрузка UI.
+
+**Статус:** investigating. См. SSE-RECON-отчёт 2026-06-13.
+
+## 15. Процедура re-smoke при исчерпании cloud-квот
+
+Когда Google Gemini RPD (rate per day) исчерпан — все sub-агенты на
+gemma-4-31b / gemini-3.1-flash-lite падают с `LiteLLM gateway call failed`.
+
+### Снапшот назначений
+
+Перед любыми изменениями — сохранить текущие:
+
+```bash
+psql "$CLAY_DATABASE_URL" \
+  -c "SELECT role_id, model_id FROM ops.ai_assignments ORDER BY role_id;"
+```
+
+### Временный перевод на локальную модель
+
+```bash
+# Убедиться, что модель gemma4:e2b-it-qat есть в реестре
+# (хардкод в ai_control/service.py _build_model_registry)
+psql "$CLAY_DATABASE_URL" \
+  -c "UPDATE ops.ai_assignments SET model_id='gemma4:e2b-it-qat'
+       WHERE role_id IN ('market-scanner','news-sentiment-agent','forecast-model');"
+# chief НЕ трогать (minimax-m3 вне Google-квоты)
+```
+
+**Важно:** `local-ollama` — невалидный model_id (отсутствует в хардкодном
+реестре `_build_model_registry`). Использовать только `gemma4:e2b-it-qat`.
+
+### Smoke
+
+По стандартной процедуре attended smoke (см. §6). После тика:
+
+```bash
+psql "$CLAY_DATABASE_URL" \
+  -c "SELECT id, role_id, model_id, error IS NULL AS ok, length(content) AS len
+       FROM ops.ai_agent_runs WHERE id > <baseline_max_id> ORDER BY id;"
+```
+
+### ОБЯЗАТЕЛЬНЫЙ REVERT
+
+```bash
+# Восстановить из снапшота
+psql "$CLAY_DATABASE_URL" \
+  -c "UPDATE ops.ai_assignments SET model_id='gemma-4-31b'
+       WHERE role_id IN ('market-scanner','news-sentiment-agent');"
+psql "$CLAY_DATABASE_URL" \
+  -c "UPDATE ops.ai_assignments SET model_id='gemini-3.1-flash-lite'
+       WHERE role_id='forecast-model';"
+
+# Контрольный SELECT
+psql "$CLAY_DATABASE_URL" \
+  -c "SELECT role_id, model_id FROM ops.ai_assignments ORDER BY role_id;"
+```
+
+Без REVERT следующий штатный тик после восстановления cloud-квоты
+пойдёт через локальную модель — неверное поведение.
